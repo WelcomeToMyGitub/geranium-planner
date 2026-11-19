@@ -145,17 +145,20 @@
 
       // 2. 基础种直接种
       if (f === "初遇" || f === "谜题") {
-        plant[f] += need[f];
+        plant[f] += need[f] / Math.max(1, cfg.harvestYield);
         need[f] = 0;
         return;
       }
 
-      // 3. 再用库存种子
+      // 3. 再用库存种子（1 颗种子收 harvestYield 朵）
+      var H = Math.max(1, cfg.harvestYield);
+      var seedsNeeded = Math.ceil(need[f] / H);
       var seeds = cfg.stock.seed[f] || 0;
-      var useSeed = Math.min(need[f], seeds);
+      var useSeed = Math.min(seedsNeeded, seeds);
       if (useSeed > 0) {
         plant[f] += useSeed;
-        need[f] -= useSeed;
+        need[f] -= useSeed * H;
+        if (need[f] < 0) need[f] = 0;
       }
       if (need[f] <= 1e-9) return;
 
@@ -201,8 +204,107 @@
     };
   }
 
+  // 轮次排程：把所有要种的种子按依赖顺序铺到地块上，算出最少几轮、每轮种什么
+  function schedule(cfg, res) {
+    var H = Math.max(1, cfg.harvestYield || 1);
+    var SY = Math.max(0, cfg.seedYield || 0);
+    var P = Math.max(1, cfg.plots || 1);
+
+    var flowers = {}, seeds = {}, target = {}, done = {};
+    cfg.flowers.forEach(function (f) {
+      flowers[f] = (cfg.stock.flower[f] || 0) + (cfg.stock.growing[f] || 0);
+      seeds[f] = cfg.stock.seed[f] || 0;
+      target[f] = Math.ceil((res.plant[f] || 0) + (res.gen[f] || 0));
+      done[f] = 0;
+    });
+
+    var synth = res.steps.map(function (s) {
+      return { f: s.f, r: s.r, left: Math.max(0, Math.ceil(s.need)) };
+    });
+
+    function remainSeeds() {
+      var t = 0;
+      cfg.flowers.forEach(function (f) { t += Math.max(0, target[f] - done[f]); });
+      return t;
+    }
+    function remainSynth() {
+      return synth.reduce(function (s, x) { return s + Math.max(0, x.left); }, 0);
+    }
+
+    var rounds = [], totalPlots = 0, guard = 0, stall = false;
+
+    while (guard++ < 400) {
+      if (remainSeeds() === 0 && remainSynth() === 0) break;
+
+      var planted = {}, producedSeeds = 0;
+
+      // 1. 先把能合的合掉（实验室不占地）
+      var changed = true;
+      while (changed) {
+        changed = false;
+        for (var i = 0; i < synth.length; i++) {
+          var st = synth[i];
+          if (st.left <= 0) continue;
+          if (flowers[st.r.a] >= 1 && flowers[st.r.b] >= 1) {
+            flowers[st.r.a] -= 1;
+            flowers[st.r.b] -= 1;
+            flowers[st.f] += 1;
+            seeds[st.f] += SY;
+            st.left -= 1;
+            producedSeeds += SY;
+            changed = true;
+          }
+        }
+      }
+
+      // 2. 种：链深的先种，基础种兜底
+      var order = cfg.flowers.slice().sort(function (a, b) {
+        var da = isFinite(res.depth[a]) ? res.depth[a] : 0;
+        var db = isFinite(res.depth[b]) ? res.depth[b] : 0;
+        return db - da;
+      });
+
+      var used = 0;
+      for (var k = 0; k < order.length && used < P; k++) {
+        var f = order[k];
+        var rem = target[f] - done[f];
+        if (rem <= 0) continue;
+        var avail;
+        if (f === "初遇" || f === "谜题") avail = rem;
+        else avail = Math.min(rem, Math.floor(seeds[f] + 1e-9));
+        if (avail <= 0) continue;
+
+        var n = Math.min(avail, P - used);
+        planted[f] = (planted[f] || 0) + n;
+        done[f] += n;
+        seeds[f] -= n;
+        used += n;
+      }
+
+      // 3. 收获：本轮种下的，下一轮才能用来合成
+      Object.keys(planted).forEach(function (f) {
+        flowers[f] += planted[f] * H;
+      });
+
+      totalPlots += used;
+      rounds.push({ planted: planted, seeds: producedSeeds });
+
+      if (used === 0 && producedSeeds === 0) { stall = true; break; }
+    }
+
+    if (remainSeeds() > 0 || remainSynth() > 0) stall = true;
+
+    var totalTarget = cfg.flowers.reduce(function (s, f) {
+      return s + Math.max(0, target[f]);
+    }, 0);
+    var lower = Math.ceil(totalTarget / P);
+
+    return { rounds: rounds, totalPlots: totalPlots, lower: lower, stall: stall };
+  }
+
   root.GPModel = {
     analyze: analyze,
+    schedule: schedule,
     fmt: fmt,
     effS: effS,
     usableRecipes: usableRecipes

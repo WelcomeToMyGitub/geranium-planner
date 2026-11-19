@@ -347,7 +347,7 @@
       .map(function (x) { return { f: x.f, n: out[x.f] }; });
   }
 
-  function planSections(res, plots) {
+  function plantingSection(res, plots, sch) {
     var plantList = state.flowers
       .filter(function (f) { return ((res.plant[f] || 0) + (res.gen[f] || 0)) > 0.01; })
       .map(function (f) {
@@ -383,7 +383,7 @@
       var c = Math.ceil(res.plant["初遇"] || 0);
       var m = Math.ceil(res.plant["谜题"] || 0);
       h += '<p class="small muted">合计 ' + Math.ceil(res.totalSeed) + " 颗，铺满 " + plots +
-        " 格约 " + res.rounds + " 轮。" +
+        " 格约 " + sch.rounds.length + " 轮。" +
         ((c || m) ? ("基础种配比 初遇 " + c + " : 谜题 " + m + " ≈ " +
           (m ? (c / m).toFixed(2) : "∞") + " : 1。") : "") + "</p>";
 
@@ -394,7 +394,11 @@
       }
     }
 
-    h += "<h3>② 合成顺序（按缺口，从材料往上）</h3>";
+    return h;
+  }
+
+  function synthSection(res) {
+    var h = "<h3>③ 合成顺序（按缺口，从材料往上）</h3>";
     if (!res.steps.length) {
       h += '<p class="empty">不需要额外合成。</p>';
     } else {
@@ -413,6 +417,33 @@
       });
       h += "</tbody></table>";
     }
+    return h;
+  }
+
+  function scheduleSection(sch) {
+    var h = "<h3>② 轮次安排</h3>";
+    if (!sch.rounds.length) {
+      h += '<p class="empty">不需要种种子。</p>';
+      return h;
+    }
+
+    h += '<p class="small">至少 <b>' + sch.rounds.length + "</b> 轮（理论下界 " + sch.lower +
+      " 轮），共使用 <b>" + sch.totalPlots + "</b> 块地·次。" +
+      (sch.stall ? ' <span class="pill bad">中途卡住：材料不够，检查配方</span>' : "") + "</p>";
+
+    h += '<details><summary>展开每轮种什么</summary>' +
+      '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>种什么</th><th>用地</th><th>本轮合成出种子</th></tr></thead><tbody>';
+    sch.rounds.forEach(function (r, i) {
+      var keys = Object.keys(r.planted);
+      var pills = keys.map(function (f) {
+        return '<span class="pill">' + esc(f) + " ×" + r.planted[f] + "</span>";
+      }).join(" ") || '<span class="muted">（空）</span>';
+      var cnt = keys.reduce(function (s, f) { return s + r.planted[f]; }, 0);
+      h += "<tr><td>第 " + (i + 1) + " 轮</td><td>" + pills + "</td>" +
+        '<td class="mono">' + cnt + "</td>" +
+        '<td class="mono">' + r.seeds + "</td></tr>";
+    });
+    h += "</tbody></table></details>";
     return h;
   }
 
@@ -442,7 +473,7 @@
       return cx - cy;
     });
 
-    var h = "<h3>③ 现在就能合的（按你手上的花材）</h3>";
+    var h = "<h3>④ 现在就能合的（按你手上的花材）</h3>";
     if (!canDo.length) {
       h += '<p class="empty">手上没有能直接配成一对的花材，先等种子成熟。</p>';
       return h;
@@ -467,7 +498,7 @@
   }
 
   function costSection(res) {
-    var h = '<details style="margin-top:14px"><summary>④ 每种花的最优路线 / 期望成本</summary>' +
+    var h = '<details style="margin-top:14px"><summary>⑤ 每种花的最优路线 / 期望成本</summary>' +
       '<table style="margin-top:8px"><thead><tr><th>花</th><th>路线</th><th>成本</th><th>成功率</th><th>状态</th></tr></thead><tbody>';
     state.flowers.forEach(function (f) {
       if (f === "初遇" || f === "谜题") return;
@@ -488,7 +519,7 @@
       return !r.o1 || r.a === "?" || r.b === "?";
     });
     if (!unknown.length) return "";
-    return '<details style="margin-top:10px"><summary>⑤ 还没填结果的配方（' + unknown.length + '）</summary><ul class="small mono">' +
+    return '<details style="margin-top:10px"><summary>⑥ 还没填结果的配方（' + unknown.length + '）</summary><ul class="small mono">' +
       unknown.map(function (r) {
         return "<li>" + esc(r.a || "?") + " × " + esc(r.b || "?") + " → " + (r.o1 ? esc(r.o1) : "?") + "</li>";
       }).join("") + "</ul></details>";
@@ -533,6 +564,8 @@
       }
     }
 
+    var sch = M.schedule(cfg(), res);
+
     var h = "";
     if (mode === "flower") {
       var have = (state.stock.flower[F] || 0) + (state.stock.growing[F] || 0);
@@ -542,7 +575,7 @@
         "<div><b>" + N + "</b><span>需要数量</span></div>" +
         "<div><b>" + have + "</b><span>现有花材</span></div>" +
         "<div><b>" + Math.ceil(res.totalSeed) + "</b><span>要种种子</span></div>" +
-        "<div><b>" + res.rounds + "</b><span>地块·轮</span></div>" +
+        "<div><b>" + sch.rounds.length + "</b><span>地块·轮</span></div>" +
         "</div>";
       h += '<p class="small muted">现有 ' + have + " 朵 + " + (state.stock.seed[F] || 0) +
         " 颗种子（约合 " + seedN + " 朵），缺口按当前库存算。</p>";
@@ -550,7 +583,7 @@
       h += '<div class="stat">' +
         "<div><b>" + res.targets.length + "</b><span>还缺图鉴</span></div>" +
         "<div><b>" + Math.ceil(res.totalSeed) + "</b><span>要种种子</span></div>" +
-        "<div><b>" + res.rounds + "</b><span>地块·轮（" + plots + " 格）</span></div>" +
+        "<div><b>" + sch.rounds.length + "</b><span>地块·轮（" + plots + " 格）</span></div>" +
         "</div>";
       h += '<p class="small muted">缺口：' + res.targets.map(function (f) {
         return '<span class="pill warn">' + esc(f) + "</span>";
@@ -558,7 +591,9 @@
     }
 
     if (ranking) h += rankingTable(ranking, F, N);
-    h += planSections(res, plots);
+    h += plantingSection(res, plots, sch);
+    h += scheduleSection(sch);
+    h += synthSection(res);
     h += canDoSection(res);
     h += costSection(res);
     h += unknownSection();
