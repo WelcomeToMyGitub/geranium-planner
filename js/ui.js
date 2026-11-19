@@ -22,7 +22,8 @@
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
     targetCount: 1,
-    sortBy: "cost"
+    sortBy: "cost",
+    onlyLocked: true
   };
 
   var undoStack = [], redoStack = [], savedRecipes = "";
@@ -52,6 +53,7 @@
         targetFlower: state.targetFlower,
         targetCount: state.targetCount,
         sortBy: state.sortBy,
+        onlyLocked: state.onlyLocked,
         unlocked: Array.from(state.unlocked)
       }));
     } catch (e) {}
@@ -80,6 +82,7 @@
         });
         if (mm.refund !== undefined) state.refund = mm.refund;
         if (mm.targetMode) state.targetMode = mm.targetMode;
+        if (mm.onlyLocked !== undefined) state.onlyLocked = mm.onlyLocked;
         if (mm.targetFlower) state.targetFlower = mm.targetFlower;
         if (mm.sortBy) state.sortBy = mm.sortBy;
         if (mm.unlocked) state.unlocked = new Set(mm.unlocked);
@@ -114,7 +117,9 @@
   }
   function renderDirty() {
     var dirty = JSON.stringify(state.recipes) !== savedRecipes;
+    var modified = JSON.stringify(state.recipes) !== JSON.stringify(D.DEFAULT_RECIPES);
     $("#dirtyFlag").textContent = dirty ? "● 配方有未保存修改" : "";
+    $("#defaultFlag").textContent = modified ? "⚠ 配方已偏离默认" : "";
     $("#btnUndo").disabled = !undoStack.length;
     $("#btnRedo").disabled = !redoStack.length;
   }
@@ -240,8 +245,14 @@
 
   // ---------- 目标 ----------
   function renderTargets() {
+    var list = state.flowers.filter(function (f) {
+      return !state.onlyLocked || !state.unlocked.has(f);
+    });
+    if (!list.length) list = state.flowers.slice();
+    if (list.indexOf(state.targetFlower) < 0) state.targetFlower = list[0];
+
     var sel = $("#targetFlower");
-    sel.innerHTML = state.flowers.map(function (f) {
+    sel.innerHTML = list.map(function (f) {
       return '<option value="' + esc(f) + '"' + (f === state.targetFlower ? " selected" : "") + ">" + esc(f) + "</option>";
     }).join("");
 
@@ -251,9 +262,11 @@
     $("#flowerTargetRow").hidden = state.targetMode !== "flower";
     $("#targetCount").value = state.targetCount;
     $("#sortBy").value = state.sortBy;
+    $("#onlyLocked").checked = state.onlyLocked;
 
+    var locked = state.flowers.filter(function (f) { return !state.unlocked.has(f); });
     $("#targetHint").textContent = state.targetMode === "unlock"
-      ? "算出还缺哪些图鉴、总共要种多少种子、按什么顺序合。"
+      ? ("只算上面没点亮的 " + locked.length + " 种：" + (locked.join("、") || "无") + "。")
       : "从现有库存出发，把每条能产出目标花的合成链都算一遍，按你选的指标排序。";
   }
 
@@ -514,15 +527,35 @@
     return h;
   }
 
-  function unknownSection() {
+  function unknownSection(res) {
+    var availOf = function (f) {
+      return (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0);
+    };
     var unknown = state.recipes.filter(function (r) {
       return !r.o1 || r.a === "?" || r.b === "?";
     });
     if (!unknown.length) return "";
-    return '<details style="margin-top:10px"><summary>⑥ 还没填结果的配方（' + unknown.length + '）</summary><ul class="small mono">' +
-      unknown.map(function (r) {
-        return "<li>" + esc(r.a || "?") + " × " + esc(r.b || "?") + " → " + (r.o1 ? esc(r.o1) : "?") + "</li>";
-      }).join("") + "</ul></details>";
+
+    var rows = unknown.map(function (r) {
+      var cost = (isFinite(res.cost[r.a]) && isFinite(res.cost[r.b]))
+        ? res.cost[r.a] + res.cost[r.b] : Infinity;
+      var can = r.a !== "?" && r.b !== "?" && availOf(r.a) >= 1 && availOf(r.b) >= 1;
+      return { r: r, cost: cost, can: can };
+    }).sort(function (a, b) { return a.cost - b.cost; });
+
+    var h = '<details style="margin-top:10px"><summary>⑥ 待测配方（' + unknown.length +
+      ' 条，按试错成本排序）</summary>' +
+      '<table style="margin-top:8px"><thead><tr><th>配方</th><th>成功率</th><th>试一次约耗</th><th>现在能试</th></tr></thead><tbody>';
+    rows.forEach(function (x) {
+      var r = x.r;
+      h += '<tr><td class="mono small">' + esc(r.a || "?") + " × " + esc(r.b || "?") +
+        " → " + (r.o1 ? esc(r.o1) : "?") + "</td>" +
+        '<td class="mono">' + (r.s == null ? "?" : Math.round(r.s * 100) + "%") + "</td>" +
+        '<td class="mono">' + (isFinite(x.cost) ? M.fmt(x.cost) : "∞") + "</td>" +
+        "<td>" + (x.can ? '<span class="pill ok">可以</span>' : '<span class="pill">先攒材料</span>') + "</td></tr>";
+    });
+    h += "</tbody></table></details>";
+    return h;
   }
 
   function rankingTable(list, F, N) {
@@ -596,7 +629,7 @@
     h += synthSection(res);
     h += canDoSection(res);
     h += costSection(res);
-    h += unknownSection();
+    h += unknownSection(res);
 
     box.innerHTML = h;
   }
@@ -626,6 +659,13 @@
       renderRecipes(); calc();
     });
 
+    $("#btnResetRecipes").addEventListener("click", function () {
+      if (!confirm("恢复成内置默认配方？当前修改可以先撤销找回。")) return;
+      pushUndo();
+      state.recipes = clone(D.DEFAULT_RECIPES);
+      renderRecipes(); calc();
+    });
+
     $("#btnAll").addEventListener("click", function () {
       if (state.unlocked.size === state.flowers.length) state.unlocked.clear();
       else state.unlocked = new Set(state.flowers);
@@ -650,6 +690,10 @@
     $("#sortBy").addEventListener("change", function () {
       state.sortBy = $("#sortBy").value;
       saveMeta(); calc();
+    });
+    $("#onlyLocked").addEventListener("change", function () {
+      state.onlyLocked = $("#onlyLocked").checked;
+      saveMeta(); renderTargets(); calc();
     });
 
     $("#btnExport").addEventListener("click", function () {

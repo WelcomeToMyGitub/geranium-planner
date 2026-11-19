@@ -50,7 +50,10 @@
   <section class="card">
     <div class="flexhead">
       <h2 style="margin:0">配方表</h2>
-      <button class="mini" id="btnToggleRecipe">展开</button>
+      <div class="row" style="margin:0">
+        <span id="defaultFlag" class="dirty"></span>
+        <button class="mini" id="btnToggleRecipe">展开</button>
+      </div>
     </div>
     <div id="recipeBody" hidden>
       <div class="row">
@@ -62,6 +65,7 @@
         <button class="mini" id="btnImport">导入 JSON</button>
         <input type="file" id="fileImport" accept=".json,application/json" hidden />
         <button class="mini" id="btnAdd">+ 加一条</button>
+        <button class="mini" id="btnResetRecipes">恢复默认配方</button>
       </div>
       <p class="small muted">产物留空 = 还没测出来（不参与成本计算，但会列进“值得试”）；成功率留空 = 未知。两个产物概率加起来应为 1。</p>
       <table id="recipeTable"></table>
@@ -78,7 +82,8 @@
       <label class="small"><input type="radio" name="targetMode" value="flower" /> 获得指定花材</label>
     </div>
     <div class="row" id="flowerTargetRow" hidden>
-      <label class="small muted">要哪种</label>
+      <label class="small"><input type="checkbox" id="onlyLocked" checked /> 只列未解锁</label>
+      <label class="small muted ml">要哪种</label>
       <select id="targetFlower"></select>
       <label class="small muted ml">数量</label>
       <input type="number" id="targetCount" min="1" max="99" step="1" value="1" />
