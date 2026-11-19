@@ -220,3 +220,167 @@ git branch -d feature/growth-time
 - `docs: 补充模型公式说明`
 
 原则：**一次提交只做一件事**，提交信息说清“做了什么”，不用说“怎么做的”。
+
+---
+
+# 第二阶段实操（分支 / 分页器 / 网络 / Pages）
+
+以下都是这套项目里真实发生过的，按时间顺序。
+
+## 九、分支完整走一遍
+
+这次改的是三个文件（`index.html`、`js/model.js`、`js/ui.js`），开了分支：
+
+```powershell
+git branch                              # 看当前在哪个分支，* 是当前
+git switch -c feature/target-mode       # 新建并切过去
+git status                              # 确认改动还在
+git add index.html js/model.js js/ui.js
+git commit -m "feat: 配方表折叠 + 指定花材求解与路线排序"
+git switch main
+git merge feature/target-mode
+git push
+git branch -d feature/target-mode
+```
+
+关键输出：
+
+```
+Updating acbe50f..9981b05
+Fast-forward
+...
+ * [new branch]      main -> main
+Deleted branch feature/target-mode (was 9981b05).
+```
+
+- `Fast-forward`：main 没有分叉，直接快进到分支的最新提交，不产生合并提交
+- `-d` 能删成功，说明这个分支**已经合并**；没合并的分支 `-d` 会拒绝，要 `-D` 强删（有风险）
+
+### 关于分支的三个结论
+
+1. 分支 = 指向某个提交的**可移动指针**，建/切/删都很便宜。
+2. 未提交的改动**不属于任何分支**，切分支时会跟着走。
+3. 删掉**未合并**的分支，提交会变成悬空提交，短期内能用 `git reflog` 找回，但不保险。
+
+## 十、`git diff` 卡在 `less` 里
+
+现象：敲 `git diff` 后满屏英文，底部有 `:`，按 `h` 后出现 “SUMMARY OF LESS COMMANDS”。
+
+这不是报错，是 Git 调用了分页器 `less`。
+
+```text
+q        退出（在帮助页里按一次回到 diff，再按一次退出）
+空格     下一屏
+b        上一屏
+/关键词  搜索
+h        帮助
+```
+
+不想进分页器：
+
+```powershell
+git --no-pager diff
+git diff --stat
+```
+
+### diff 怎么看
+
+```
+diff --git a/index.html b/index.html   ← 比较这个文件
+index ffd61e2..8ffb39a 100644          ← 两个版本的内部编号
+--- a/index.html                       ← 旧版
++++ b/index.html                       ← 新版
+@@ -8,8 +8,8 @@                        ← 从第 8 行起，各 8 行
+-  旧的一行
++  新的一行
+```
+
+| 命令 | 比较范围 |
+|---|---|
+| `git diff` | 工作区 ↔ 暂存区（还没 add 的） |
+| `git diff --staged` | 暂存区 ↔ 上次提交 |
+| `git diff HEAD` | 工作区 ↔ 上次提交 |
+
+## 十一、push 报 `Connection was reset`
+
+```text
+fatal: unable to access 'https://github.com/...': Recv failure: Connection was reset
+```
+
+**这是网络问题，不是代码问题。** 本地提交已经存在，不会丢。
+
+处理顺序：
+
+1. 直接重试 `git push`（多数时候几次就好）
+2. 有代理就配：
+
+```powershell
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+git push
+# 不用了取消
+git config --global --unset http.proxy
+git config --global --unset https.proxy
+```
+
+3. 改用 SSH：
+
+```powershell
+ssh-keygen -t ed25519 -C "2638838069@qq.com"
+Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
+# 复制到 GitHub → Settings → SSH and GPG keys → New SSH key
+ssh -T git@github.com
+git remote set-url origin git@github.com:WelcomeToMyGitub/geranium-planner.git
+git push
+```
+
+## 十二、GitHub Pages
+
+1. 仓库 → Settings → Pages
+2. Source 选 `Deploy from a branch`
+3. Branch 选 `main`，目录 `/ (root)`，Save
+4. 等 1~2 分钟，页面顶部出现 `Your site is live at ...`
+
+本项目的地址：
+
+```text
+https://welcometomygitub.github.io/geranium-planner/
+```
+
+要点：
+
+- 之后每次 `git push` 到 main，会自动重新发布，等一分钟刷新
+- 仓库必须 **Public**；Private 用 Pages 需要 GitHub Pro
+- `localStorage` 按域名隔离，`file://` 和 `github.io` 的数据**不互通**，换过去要重填库存（配方可以导出/导入 JSON）
+- 有链接就能访问 ≠ 搜索引擎能搜到；收录需要时间和外链
+
+## 十三、提交历史（截至 2026-11-19）
+
+```text
+* d3c8c5a feat: 轮次排程 + 种子按收获数折算
+* 9981b05 feat: 配方表折叠 + 指定花材求解与路线排序
+* acbe50f init: 项目骨架、样式、默认数据
+```
+
+`git log --oneline --graph` 可以看同样的内容，带分支线。
+
+## 十四、每次改完的固定动作
+
+```powershell
+git status                 # 1. 看改了哪些文件
+git diff --stat            # 2. 看改动规模（想细看就 git diff）
+# 3. 打开页面自测
+git add 具体文件            # 4. 精确添加，别用 . 盲加
+git commit -m "feat: xxx"  # 5. 一次一件事
+git push                   # 6. 推上去
+```
+
+## 十五、这一阶段最值钱的几条经验
+
+1. **`user.name` ≠ GitHub 用户名**，远程地址里必须是账号名。
+2. **GitHub 页面上的提交信息列，是 `-m` 写的内容**，GitHub 只负责按历史展示。
+3. **分支是保险，不是规矩**：小改动直接 main 也行，大改动开分支。
+4. **push 失败不影响本地提交**，网络恢复后重试即可。
+5. **浏览器读的是工作区文件，不是 git 历史**：改完刷新就生效，commit 只是存档。
+6. **Pages 是公开的**，放上去等于把源码和页面都给所有人看。
+
