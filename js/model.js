@@ -26,7 +26,7 @@
   }
 
   // 每种花“折合多少基础种子”的最小成本
-  function computeCosts(cfg, scale) {
+  function computeCosts(cfg, scale, force) {
     var flowers = cfg.flowers;
     var cost = {}, choice = {};
     flowers.forEach(function (f) { cost[f] = Infinity; });
@@ -61,6 +61,22 @@
       }
       if (!changed) break;
     }
+    // 强制指定某个花走某条配方（用于“指定花材”模式下逐条比较路线）
+    if (force) {
+      Object.keys(force).forEach(function (f) {
+        var r = force[f];
+        if (!r) return;
+        var ca = cost[r.a], cb = cost[r.b];
+        if (!isFinite(ca) || !isFinite(cb)) return;
+        var p = (r.o1 === f) ? r.p1 : r.p2;
+        if (!(p > 0)) return;
+        var s = effS(r, cfg.fallback, scale);
+        var mult = (1 - cfg.refund * (1 - s)) / s;
+        cost[f] = (ca + cb) * mult / (p * perSuccess);
+        choice[f] = r;
+      });
+    }
+
     return { cost: cost, choice: choice };
   }
 
@@ -86,21 +102,28 @@
     return depth;
   }
 
-  function analyze(cfg, scale) {
+  function analyze(cfg, scale, opts) {
     scale = scale || 1;
+    opts = opts || {};
     var flowers = cfg.flowers;
 
-    var cc = computeCosts(cfg, scale);
+    var cc = computeCosts(cfg, scale, opts.force);
     var cost = cc.cost, choice = cc.choice;
     var depth = computeDepth(choice, flowers);
 
     var unlocked = {};
     cfg.unlocked.forEach(function (f) { unlocked[f] = true; });
-    var targets = flowers.filter(function (f) { return !unlocked[f]; });
+    var targets = opts.targets || flowers.filter(function (f) { return !unlocked[f]; });
 
     var need = {}, plant = {}, gen = {}, used = {};
     flowers.forEach(function (f) { need[f] = 0; plant[f] = 0; gen[f] = 0; });
-    targets.forEach(function (f) { need[f] += 1; });
+    if (opts.demand) {
+      Object.keys(opts.demand).forEach(function (f) {
+        need[f] = (need[f] || 0) + opts.demand[f];
+      });
+    } else {
+      targets.forEach(function (f) { need[f] += 1; });
+    }
 
     // 从成品往基础种推：深度大的先处理
     var order = flowers.slice().sort(function (a, b) {

@@ -8,8 +8,8 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>天竺葵育种规划器 <span class="muted ver">v3</span></h1>
-  <p class="sub">全局按地块算种植总量，再按“你现在手上真有的花材”推荐合成顺序。配方与库存分开保存。</p>
+  <h1>天竺葵育种规划器 <span class="muted ver">v4</span></h1>
+  <p class="sub">先选目标：解锁全部图鉴，或者要 N 朵指定花材。程序从你现有材料出发，排出合成链并排序。</p>
 
   <div class="grid">
     <section class="card">
@@ -40,7 +40,7 @@
         <label class="small muted ml">每颗种子收获花朵</label>
         <input type="number" id="harvestYield" min="1" max="10" step="1" value="2" />
       </div>
-      <p class="small muted">成功率写在配方表里；留空 = 未知，用上面的默认值补（表格里标灰）。</p>
+      <p class="small muted">成功率是固定值，按配方表里填的算；留空才用默认值。</p>
       <hr />
       <div class="flexhead"><h2 style="margin:0">已解锁图鉴</h2><button class="mini" id="btnAll">全选/全不选</button></div>
       <div id="unlockBox" class="row"></div>
@@ -50,6 +50,9 @@
   <section class="card">
     <div class="flexhead">
       <h2 style="margin:0">配方表</h2>
+      <button class="mini" id="btnToggleRecipe">展开</button>
+    </div>
+    <div id="recipeBody" hidden>
       <div class="row">
         <span id="dirtyFlag" class="dirty"></span>
         <button class="mini" id="btnUndo" title="Ctrl+Z">↶ 撤销</button>
@@ -59,11 +62,34 @@
         <button class="mini" id="btnImport">导入 JSON</button>
         <input type="file" id="fileImport" accept=".json,application/json" hidden />
         <button class="mini" id="btnAdd">+ 加一条</button>
-        <button class="mini primary" id="btnCalc">计算</button>
       </div>
+      <p class="small muted">产物留空 = 还没测出来（不参与成本计算，但会列进“值得试”）；成功率留空 = 未知。两个产物概率加起来应为 1。</p>
+      <table id="recipeTable"></table>
     </div>
-    <p class="small muted">产物留空 = 还没测出来（不参与成本计算，但会列进“值得试”）；成功率留空 = 未知。两个产物概率加起来应为 1。</p>
-    <table id="recipeTable"></table>
+  </section>
+
+  <section class="card">
+    <div class="flexhead">
+      <h2 style="margin:0">求解目标</h2>
+      <button class="mini primary" id="btnCalc">计算</button>
+    </div>
+    <div class="row">
+      <label class="small"><input type="radio" name="targetMode" value="unlock" checked /> 解锁全部图鉴</label>
+      <label class="small"><input type="radio" name="targetMode" value="flower" /> 获得指定花材</label>
+    </div>
+    <div class="row" id="flowerTargetRow" hidden>
+      <label class="small muted">要哪种</label>
+      <select id="targetFlower"></select>
+      <label class="small muted ml">数量</label>
+      <input type="number" id="targetCount" min="1" max="99" step="1" value="1" />
+      <label class="small muted ml">排序方式</label>
+      <select id="sortBy">
+        <option value="cost">性价比（基础种子最少）</option>
+        <option value="speed">速度（地块·轮最少）</option>
+        <option value="safe">稳妥（总尝试次数最少）</option>
+      </select>
+    </div>
+    <p class="small muted" id="targetHint"></p>
   </section>
 
   <section class="card">

@@ -5,9 +5,9 @@
 
   var D = root.GPData, M = root.GPModel;
 
-  var LS_STOCK = "gp-stock-v3";
-  var LS_RECIPES = "gp-recipes-v3";
-  var LS_META = "gp-meta-v3";
+  var LS_STOCK = "gp-stock-v4";
+  var LS_RECIPES = "gp-recipes-v4";
+  var LS_META = "gp-meta-v4";
 
   var state = {
     flowers: D.FLOWERS.slice(),
@@ -18,7 +18,11 @@
     fallback: 0.30,
     refund: 0,
     seedYield: 1,
-    harvestYield: 2
+    harvestYield: 2,
+    targetMode: "unlock",
+    targetFlower: "天鹅初恋",
+    targetCount: 1,
+    sortBy: "cost"
   };
 
   var undoStack = [], redoStack = [], savedRecipes = "";
@@ -44,6 +48,10 @@
         refund: state.refund,
         seedYield: state.seedYield,
         harvestYield: state.harvestYield,
+        targetMode: state.targetMode,
+        targetFlower: state.targetFlower,
+        targetCount: state.targetCount,
+        sortBy: state.sortBy,
         unlocked: Array.from(state.unlocked)
       }));
     } catch (e) {}
@@ -57,24 +65,26 @@
   }
   function loadAll() {
     try {
-      var s = localStorage.getItem(LS_STOCK);
+      var s = localStorage.getItem(LS_STOCK) || localStorage.getItem("gp-stock-v3");
       if (s) {
         var d = JSON.parse(s);
         state.stock.flower = d.flower || {};
         state.stock.growing = d.growing || {};
         state.stock.seed = d.seed || {};
       }
-      var m = localStorage.getItem(LS_META);
+      var m = localStorage.getItem(LS_META) || localStorage.getItem("gp-meta-v3");
       if (m) {
         var mm = JSON.parse(m);
-        if (mm.plots) state.plots = mm.plots;
-        if (mm.fallback) state.fallback = mm.fallback;
+        ["plots", "fallback", "seedYield", "harvestYield", "targetCount"].forEach(function (k) {
+          if (mm[k] !== undefined) state[k] = mm[k];
+        });
         if (mm.refund !== undefined) state.refund = mm.refund;
-        if (mm.seedYield !== undefined) state.seedYield = mm.seedYield;
-        if (mm.harvestYield !== undefined) state.harvestYield = mm.harvestYield;
+        if (mm.targetMode) state.targetMode = mm.targetMode;
+        if (mm.targetFlower) state.targetFlower = mm.targetFlower;
+        if (mm.sortBy) state.sortBy = mm.sortBy;
         if (mm.unlocked) state.unlocked = new Set(mm.unlocked);
       }
-      var r = localStorage.getItem(LS_RECIPES);
+      var r = localStorage.getItem(LS_RECIPES) || localStorage.getItem("gp-recipes-v3");
       if (r) {
         var rr = JSON.parse(r);
         if (Array.isArray(rr) && rr.length) state.recipes = rr;
@@ -107,6 +117,10 @@
     $("#dirtyFlag").textContent = dirty ? "● 配方有未保存修改" : "";
     $("#btnUndo").disabled = !undoStack.length;
     $("#btnRedo").disabled = !redoStack.length;
+  }
+  function renderRecipeToggle() {
+    var open = !$("#recipeBody").hidden;
+    $("#btnToggleRecipe").textContent = (open ? "收起" : "展开") + "（" + state.recipes.length + " 条）";
   }
 
   // ---------- 库存 ----------
@@ -163,7 +177,7 @@
     $("#unlockPill").textContent = state.unlocked.size + "/" + state.flowers.length + " 已解锁";
   }
 
-  // ---------- 配方表 ----------
+  // ---------- 配方 ----------
   function flowerOptions(cur) {
     var h = '<option value="">（未知）</option>';
     state.flowers.forEach(function (f) {
@@ -221,6 +235,26 @@
       });
     });
     renderDirty();
+    renderRecipeToggle();
+  }
+
+  // ---------- 目标 ----------
+  function renderTargets() {
+    var sel = $("#targetFlower");
+    sel.innerHTML = state.flowers.map(function (f) {
+      return '<option value="' + esc(f) + '"' + (f === state.targetFlower ? " selected" : "") + ">" + esc(f) + "</option>";
+    }).join("");
+
+    document.querySelectorAll('input[name="targetMode"]').forEach(function (r) {
+      r.checked = (r.value === state.targetMode);
+    });
+    $("#flowerTargetRow").hidden = state.targetMode !== "flower";
+    $("#targetCount").value = state.targetCount;
+    $("#sortBy").value = state.sortBy;
+
+    $("#targetHint").textContent = state.targetMode === "unlock"
+      ? "算出还缺哪些图鉴、总共要种多少种子、按什么顺序合。"
+      : "从现有库存出发，把每条能产出目标花的合成链都算一遍，按你选的指标排序。";
   }
 
   // ---------- 计算 ----------
@@ -236,6 +270,54 @@
       seedYield: state.seedYield,
       harvestYield: state.harvestYield
     };
+  }
+
+  function baseCostOf(res) {
+    return (res.plant["初遇"] || 0) + (res.plant["谜题"] || 0);
+  }
+  function attemptsOf(res) {
+    return res.steps.reduce(function (s, x) { return s + x.attempts; }, 0);
+  }
+
+  function rankChains(F, N) {
+    var demand = {}, list = [];
+    demand[F] = N;
+
+    state.recipes.forEach(function (r) {
+      if (r.o1 !== F && r.o2 !== F) return;
+      if (!r.a || !r.b || r.a === "?" || r.b === "?" || !r.o1) return;
+      var force = {};
+      force[F] = r;
+      var res = M.analyze(cfg(), 1, { demand: demand, targets: [F], force: force });
+      list.push({
+        label: r.a + " × " + r.b,
+        res: res,
+        baseCost: baseCostOf(res),
+        attempts: attemptsOf(res),
+        rounds: res.rounds,
+        steps: res.steps.length
+      });
+    });
+
+    if (!list.length) {
+      var res0 = M.analyze(cfg(), 1, { demand: demand, targets: [F] });
+      list.push({
+        label: "直接种 / 用库存",
+        res: res0,
+        baseCost: baseCostOf(res0),
+        attempts: attemptsOf(res0),
+        rounds: res0.rounds,
+        steps: res0.steps.length
+      });
+    }
+
+    var key = state.sortBy;
+    list.sort(function (a, b) {
+      if (key === "speed") return (a.rounds - b.rounds) || (a.attempts - b.attempts);
+      if (key === "safe") return (a.attempts - b.attempts) || (a.baseCost - b.baseCost);
+      return (a.baseCost - b.baseCost) || (a.attempts - b.attempts);
+    });
+    return list;
   }
 
   function allocRound(list, P) {
@@ -265,17 +347,7 @@
       .map(function (x) { return { f: x.f, n: out[x.f] }; });
   }
 
-  function calc() {
-    var res = M.analyze(cfg(), 1);
-    var box = $("#result");
-
-    if (!res.targets.length) {
-      box.innerHTML = '<p class="empty">图鉴已经全解锁了 🎉</p>';
-      return;
-    }
-
-    var plots = Math.max(1, Math.round(state.plots));
-
+  function planSections(res, plots) {
     var plantList = state.flowers
       .filter(function (f) { return ((res.plant[f] || 0) + (res.gen[f] || 0)) > 0.01; })
       .map(function (f) {
@@ -293,48 +365,7 @@
       plots
     );
 
-    // 现在立刻能合的
-    var availOf = function (f) {
-      return (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0);
-    };
-    var canDo = [];
-    state.recipes.forEach(function (r) {
-      if (!r.a || !r.b || r.a === "?" || r.b === "?") return;
-      if (state.flowers.indexOf(r.a) < 0 || state.flowers.indexOf(r.b) < 0) return;
-      var n = Math.min(availOf(r.a), availOf(r.b));
-      if (n < 1) return;
-      var outs = [];
-      if (r.o1 && r.p1 > 0) outs.push([r.o1, r.p1]);
-      if (r.o2 && r.p2 > 0) outs.push([r.o2, r.p2]);
-      var useful = outs.length === 0 ? true : outs.some(function (o) {
-        return !state.unlocked.has(o[0]);
-      });
-      canDo.push({ r: r, n: n, outs: outs, useful: useful });
-    });
-    canDo.sort(function (x, y) {
-      function rank(c) { return c.outs.length === 0 ? 1 : (c.useful ? 0 : 2); }
-      if (rank(x) !== rank(y)) return rank(x) - rank(y);
-      var cx = x.outs[0] ? (res.cost[x.outs[0][0]] || 1e9) : 1e9;
-      var cy = y.outs[0] ? (res.cost[y.outs[0][0]] || 1e9) : 1e9;
-      return cx - cy;
-    });
-
-    var rLow = M.analyze(cfg(), 0.7).rounds;
-    var rHigh = M.analyze(cfg(), 1.3).rounds;
-
-    var h = '<div class="stat">' +
-      "<div><b>" + res.targets.length + "</b><span>还缺图鉴</span></div>" +
-      "<div><b>" + Math.ceil(res.totalSeed) + "</b><span>要种种子</span></div>" +
-      "<div><b>" + res.rounds + "</b><span>地块·轮（" + plots + " 格）</span></div>" +
-      "<div><b>" + rLow + "～" + rHigh + "</b><span>成功率 ±30% 范围</span></div>" +
-      "</div>";
-
-    h += '<p class="small muted">缺口：' + res.targets.map(function (f) {
-      return '<span class="pill warn">' + esc(f) + "</span>";
-    }).join(" ") + "　成功率整体 -30% → " + rLow + " 轮；+30% → " + rHigh + " 轮。</p>";
-
-    // ① 种植
-    h += "<h3>① 全局种植计划</h3>";
+    var h = "<h3>① 全局种植计划</h3>";
     if (!plantList.length) {
       h += '<p class="empty">不需要种种子，现有花材够合。</p>';
     } else {
@@ -363,31 +394,7 @@
       }
     }
 
-    // ② 现在就能合
-    h += "<h3>② 现在就能合的（按你手上的花材）</h3>";
-    if (!canDo.length) {
-      h += '<p class="empty">手上没有能直接配成一对的花材，先等种子成熟。</p>';
-    } else {
-      h += "<table><thead><tr><th>配方</th><th>成功率</th><th>能做</th><th>期望产物</th><th>建议</th></tr></thead><tbody>";
-      canDo.slice(0, 14).forEach(function (c2) {
-        var r = c2.r;
-        var s = M.effS(r, state.fallback, 1);
-        var expTxt = c2.outs.length
-          ? c2.outs.map(function (o) { return esc(o[0]) + "×" + M.fmt(c2.n * s * o[1]); }).join("，")
-          : '<span class="muted">结果未知</span>';
-        var tip = c2.outs.length === 0
-          ? '<span class="pill warn">值得试</span>'
-          : (c2.useful ? '<span class="pill ok">推荐</span>' : '<span class="pill">已够</span>');
-        h += "<tr><td class=\"small mono\">" + esc(r.a) + " × " + esc(r.b) + "</td>" +
-          '<td class="mono">' + Math.round(s * 100) + "%" + (r.s == null ? "*" : "") + "</td>" +
-          '<td class="mono">' + c2.n + "</td>" +
-          '<td class="small">' + expTxt + "</td><td>" + tip + "</td></tr>";
-      });
-      h += '</tbody></table><p class="small muted">* = 成功率是默认值补的，不是实测。</p>';
-    }
-
-    // ③ 合成顺序
-    h += "<h3>③ 合成顺序（按缺口，从材料往上）</h3>";
+    h += "<h3>② 合成顺序（按缺口，从材料往上）</h3>";
     if (!res.steps.length) {
       h += '<p class="empty">不需要额外合成。</p>';
     } else {
@@ -406,9 +413,61 @@
       });
       h += "</tbody></table>";
     }
+    return h;
+  }
 
-    // ④ 成本
-    h += '<details style="margin-top:14px"><summary>④ 每种花的最优路线 / 期望成本</summary>' +
+  function canDoSection(res) {
+    var availOf = function (f) {
+      return (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0);
+    };
+    var canDo = [];
+    state.recipes.forEach(function (r) {
+      if (!r.a || !r.b || r.a === "?" || r.b === "?") return;
+      if (state.flowers.indexOf(r.a) < 0 || state.flowers.indexOf(r.b) < 0) return;
+      var n = Math.min(availOf(r.a), availOf(r.b));
+      if (n < 1) return;
+      var outs = [];
+      if (r.o1 && r.p1 > 0) outs.push([r.o1, r.p1]);
+      if (r.o2 && r.p2 > 0) outs.push([r.o2, r.p2]);
+      var useful = outs.length === 0 ? true : outs.some(function (o) {
+        return !state.unlocked.has(o[0]);
+      });
+      canDo.push({ r: r, n: n, outs: outs, useful: useful });
+    });
+    canDo.sort(function (x, y) {
+      function rank(c) { return c.outs.length === 0 ? 1 : (c.useful ? 0 : 2); }
+      if (rank(x) !== rank(y)) return rank(x) - rank(y);
+      var cx = x.outs[0] ? (res.cost[x.outs[0][0]] || 1e9) : 1e9;
+      var cy = y.outs[0] ? (res.cost[y.outs[0][0]] || 1e9) : 1e9;
+      return cx - cy;
+    });
+
+    var h = "<h3>③ 现在就能合的（按你手上的花材）</h3>";
+    if (!canDo.length) {
+      h += '<p class="empty">手上没有能直接配成一对的花材，先等种子成熟。</p>';
+      return h;
+    }
+    h += "<table><thead><tr><th>配方</th><th>成功率</th><th>能做</th><th>期望产物</th><th>建议</th></tr></thead><tbody>";
+    canDo.slice(0, 14).forEach(function (c) {
+      var r = c.r;
+      var s = M.effS(r, state.fallback, 1);
+      var expTxt = c.outs.length
+        ? c.outs.map(function (o) { return esc(o[0]) + "×" + M.fmt(c.n * s * o[1]); }).join("，")
+        : '<span class="muted">结果未知</span>';
+      var tip = c.outs.length === 0
+        ? '<span class="pill warn">值得试</span>'
+        : (c.useful ? '<span class="pill ok">推荐</span>' : '<span class="pill">已够</span>');
+      h += '<tr><td class="small mono">' + esc(r.a) + " × " + esc(r.b) + "</td>" +
+        '<td class="mono">' + Math.round(s * 100) + "%" + (r.s == null ? "*" : "") + "</td>" +
+        '<td class="mono">' + c.n + "</td>" +
+        '<td class="small">' + expTxt + "</td><td>" + tip + "</td></tr>";
+    });
+    h += '</tbody></table><p class="small muted">* = 成功率是默认值补的，不是实测。</p>';
+    return h;
+  }
+
+  function costSection(res) {
+    var h = '<details style="margin-top:14px"><summary>④ 每种花的最优路线 / 期望成本</summary>' +
       '<table style="margin-top:8px"><thead><tr><th>花</th><th>路线</th><th>成本</th><th>成功率</th><th>状态</th></tr></thead><tbody>';
     state.flowers.forEach(function (f) {
       if (f === "初遇" || f === "谜题") return;
@@ -420,27 +479,99 @@
         '<td class="mono">' + (s ? Math.round(s * 100) + "%" : "—") + "</td>" +
         "<td>" + (state.unlocked.has(f) ? '<span class="pill ok">已解锁</span>' : '<span class="pill warn">缺</span>') + "</td></tr>";
     });
-    h += '</tbody></table><p class="small muted">成本 = 折合基础种子，已含成功率、种子产出与失败返还。</p></details>';
+    h += '</tbody></table><p class="small muted">成本 = 折合基础种子，已含固定成功率、种子产出与失败返还。</p></details>';
+    return h;
+  }
 
-    // ⑤ 待测
+  function unknownSection() {
     var unknown = state.recipes.filter(function (r) {
       return !r.o1 || r.a === "?" || r.b === "?";
     });
-    if (unknown.length) {
-      h += '<details style="margin-top:10px"><summary>⑤ 还没填结果的配方（' + unknown.length + '）</summary><ul class="small mono">' +
-        unknown.map(function (r) {
-          return "<li>" + esc(r.a || "?") + " × " + esc(r.b || "?") + " → " + (r.o1 ? esc(r.o1) : "?") + "</li>";
-        }).join("") + "</ul></details>";
+    if (!unknown.length) return "";
+    return '<details style="margin-top:10px"><summary>⑤ 还没填结果的配方（' + unknown.length + '）</summary><ul class="small mono">' +
+      unknown.map(function (r) {
+        return "<li>" + esc(r.a || "?") + " × " + esc(r.b || "?") + " → " + (r.o1 ? esc(r.o1) : "?") + "</li>";
+      }).join("") + "</ul></details>";
+  }
+
+  function rankingTable(list, F, N) {
+    var h = "<h3>候选路线（目标：" + esc(F) + " ×" + N + "）</h3>";
+    h += "<table><thead><tr><th>#</th><th>路线</th><th>成功步数</th><th>总尝试</th><th>基础种子</th><th>地块·轮</th><th></th></tr></thead><tbody>";
+    list.forEach(function (x, i) {
+      h += "<tr><td>" + (i + 1) + "</td><td class=\"mono small\">" + esc(x.label) + "</td>" +
+        '<td class="mono">' + x.steps + "</td>" +
+        '<td class="mono">' + Math.ceil(x.attempts) + "</td>" +
+        '<td class="mono">' + Math.ceil(x.baseCost) + "</td>" +
+        '<td class="mono">' + x.rounds + "</td>" +
+        "<td>" + (i === 0 ? '<span class="pill ok">推荐</span>' : "") + "</td></tr>";
+    });
+    h += "</tbody></table>";
+    return h;
+  }
+
+  function calc() {
+    var box = $("#result");
+    var plots = Math.max(1, Math.round(state.plots));
+    var mode = state.targetMode;
+    var res, ranking = null, F = null, N = 1;
+
+    if (mode === "flower") {
+      F = state.targetFlower;
+      N = Math.max(1, Math.round(state.targetCount) || 1);
+      if (!F) { box.innerHTML = '<p class="empty">先选一个目标花材。</p>'; return; }
+      ranking = rankChains(F, N);
+      if (!ranking.length) {
+        box.innerHTML = '<p class="empty">这个花材暂时没有可用配方，先补配方表。</p>';
+        return;
+      }
+      res = ranking[0].res;
+    } else {
+      res = M.analyze(cfg(), 1);
+      if (!res.targets.length) {
+        box.innerHTML = '<p class="empty">图鉴已经全解锁了 🎉</p>';
+        return;
+      }
     }
+
+    var h = "";
+    if (mode === "flower") {
+      var have = (state.stock.flower[F] || 0) + (state.stock.growing[F] || 0);
+      var seedN = (state.stock.seed[F] || 0) * state.harvestYield;
+      h += '<div class="stat">' +
+        "<div><b>" + esc(F) + "</b><span>目标花材</span></div>" +
+        "<div><b>" + N + "</b><span>需要数量</span></div>" +
+        "<div><b>" + have + "</b><span>现有花材</span></div>" +
+        "<div><b>" + Math.ceil(res.totalSeed) + "</b><span>要种种子</span></div>" +
+        "<div><b>" + res.rounds + "</b><span>地块·轮</span></div>" +
+        "</div>";
+      h += '<p class="small muted">现有 ' + have + " 朵 + " + (state.stock.seed[F] || 0) +
+        " 颗种子（约合 " + seedN + " 朵），缺口按当前库存算。</p>";
+    } else {
+      h += '<div class="stat">' +
+        "<div><b>" + res.targets.length + "</b><span>还缺图鉴</span></div>" +
+        "<div><b>" + Math.ceil(res.totalSeed) + "</b><span>要种种子</span></div>" +
+        "<div><b>" + res.rounds + "</b><span>地块·轮（" + plots + " 格）</span></div>" +
+        "</div>";
+      h += '<p class="small muted">缺口：' + res.targets.map(function (f) {
+        return '<span class="pill warn">' + esc(f) + "</span>";
+      }).join(" ") + "</p>";
+    }
+
+    if (ranking) h += rankingTable(ranking, F, N);
+    h += planSections(res, plots);
+    h += canDoSection(res);
+    h += costSection(res);
+    h += unknownSection();
 
     box.innerHTML = h;
   }
 
-  // ---------- 渲染 + 事件 ----------
+  // ---------- 事件 ----------
   function renderAll() {
     renderStock();
     renderUnlock();
     renderRecipes();
+    renderTargets();
   }
 
   function bindEvents() {
@@ -448,6 +579,11 @@
     $("#btnUndo").addEventListener("click", doUndo);
     $("#btnRedo").addEventListener("click", doRedo);
     $("#btnSave").addEventListener("click", saveRecipes);
+
+    $("#btnToggleRecipe").addEventListener("click", function () {
+      $("#recipeBody").hidden = !$("#recipeBody").hidden;
+      renderRecipeToggle();
+    });
 
     $("#btnAdd").addEventListener("click", function () {
       pushUndo();
@@ -459,6 +595,26 @@
       if (state.unlocked.size === state.flowers.length) state.unlocked.clear();
       else state.unlocked = new Set(state.flowers);
       saveMeta(); renderAll(); calc();
+    });
+
+    document.querySelectorAll('input[name="targetMode"]').forEach(function (r) {
+      r.addEventListener("change", function () {
+        if (!r.checked) return;
+        state.targetMode = r.value;
+        saveMeta(); renderTargets(); calc();
+      });
+    });
+    $("#targetFlower").addEventListener("change", function () {
+      state.targetFlower = $("#targetFlower").value;
+      saveMeta(); calc();
+    });
+    $("#targetCount").addEventListener("change", function () {
+      state.targetCount = Math.max(1, Math.round(num($("#targetCount").value) || 1));
+      saveMeta(); calc();
+    });
+    $("#sortBy").addEventListener("change", function () {
+      state.sortBy = $("#sortBy").value;
+      saveMeta(); calc();
     });
 
     $("#btnExport").addEventListener("click", function () {
