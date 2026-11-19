@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>天竺葵育种规划器</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <h1>天竺葵育种规划器 <span class="muted ver">v3</span></h1>
+  <p class="sub">全局按地块算种植总量，再按“你现在手上真有的花材”推荐合成顺序。配方与库存分开保存。</p>
+
+  <div class="grid">
+    <section class="card">
+      <div class="flexhead"><h2>库存</h2><span class="pill" id="unlockPill"></span></div>
+      <table id="stockTable"></table>
+      <p class="small muted">花材 = 已收在仓库；生长中 = 已种下未收；种子 = 还没种。</p>
+    </section>
+
+    <section class="card">
+      <h2>设置</h2>
+      <div class="row">
+        <label class="small muted">地块数</label>
+        <input type="number" id="plots" min="1" max="99" step="1" value="8" />
+        <label class="small muted ml">未知成功率默认</label>
+        <input type="number" id="fallback" min="0.01" max="1" step="0.01" value="0.30" />
+      </div>
+      <div class="row">
+        <label class="small muted">失败返还</label>
+        <select id="refund">
+          <option value="0">不返还（只给花花币）</option>
+          <option value="0.5">返还一半材料</option>
+          <option value="1">全部返还</option>
+        </select>
+      </div>
+      <div class="row">
+        <label class="small muted">每次成功产出种子</label>
+        <input type="number" id="seedYield" min="0" max="10" step="1" value="1" />
+        <label class="small muted ml">每颗种子收获花朵</label>
+        <input type="number" id="harvestYield" min="1" max="10" step="1" value="2" />
+      </div>
+      <p class="small muted">成功率写在配方表里；留空 = 未知，用上面的默认值补（表格里标灰）。</p>
+      <hr />
+      <div class="flexhead"><h2 style="margin:0">已解锁图鉴</h2><button class="mini" id="btnAll">全选/全不选</button></div>
+      <div id="unlockBox" class="row"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="flexhead">
+      <h2 style="margin:0">配方表</h2>
+      <div class="row">
+        <span id="dirtyFlag" class="dirty"></span>
+        <button class="mini" id="btnUndo" title="Ctrl+Z">↶ 撤销</button>
+        <button class="mini" id="btnRedo" title="Ctrl+Y">↷ 重做</button>
+        <button class="mini" id="btnSave">保存配方</button>
+        <button class="mini" id="btnExport">导出 JSON</button>
+        <button class="mini" id="btnImport">导入 JSON</button>
+        <input type="file" id="fileImport" accept=".json,application/json" hidden />
+        <button class="mini" id="btnAdd">+ 加一条</button>
+        <button class="mini primary" id="btnCalc">计算</button>
+      </div>
+    </div>
+    <p class="small muted">产物留空 = 还没测出来（不参与成本计算，但会列进“值得试”）；成功率留空 = 未知。两个产物概率加起来应为 1。</p>
+    <table id="recipeTable"></table>
+  </section>
+
+  <section class="card">
+    <h2>规划结果</h2>
+    <div id="result"><p class="empty">点「计算」。</p></div>
+  </section>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/model.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
