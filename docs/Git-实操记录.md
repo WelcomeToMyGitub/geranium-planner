@@ -384,3 +384,170 @@ git push                   # 6. 推上去
 5. **浏览器读的是工作区文件，不是 git 历史**：改完刷新就生效，commit 只是存档。
 6. **Pages 是公开的**，放上去等于把源码和页面都给所有人看。
 
+---
+
+# 第三阶段：分支的几个细节问题
+
+## 十六、切分支会改本地文件吗
+
+会，但只改**本地工作区**，和 GitHub 无关。
+
+- `git switch xxx` 会把工作区的文件换成 `xxx` 分支当前提交的样子
+- **不会**从 GitHub 拉东西；只有 `git pull` / `git fetch` 才会访问远程
+- 所以“切分支”不是下载，是**在本地已存在的提交之间切换快照**
+
+未提交的改动怎么办：
+
+| 情况 | 结果 |
+|---|---|
+| 改动和要切的版本不冲突 | 改动跟着过去，不丢 |
+| 改动会被覆盖 | Git 拒绝切换，提示 `Your local changes would be overwritten` |
+| 已经 commit | 属于那个分支，切换后看不到，切回来还在 |
+
+本地和远程的关系：
+
+```text
+工作区 ──add──▶ 暂存区 ──commit──▶ 本地仓库 ──push──▶ GitHub
+                                      ◀──pull/fetch──
+```
+
+`switch` 只在前两格之间动，碰不到 GitHub。
+
+## 十七、多久提交一次
+
+三个层次分开看：
+
+| 动作 | 频率 | 说明 |
+|---|---|---|
+| `commit` | 每完成一个能跑的小步骤（10~30 分钟） | 本地操作，免费，越细越好回退 |
+| `push` | 一天一次，或一个功能一次 | 只是备份到 GitHub，不必每次提交都推 |
+| 分支 | 一个功能一个分支 | 可以多次提交，最后一起 merge |
+
+推荐的粒度：
+
+- 改完一个按钮、一个函数、修一个 bug → commit 一次
+- 一个功能拆成 3~5 个 commit → 最后 merge 进 main → push 一次
+- 不要攒一整天再提交，出问题时不好定位
+
+## 十八、一个功能一个分支，多次提交再合并
+
+完全可以，而且是最常见的做法：
+
+```powershell
+git switch -c feature/explore-mode
+# 第一次提交
+git add js/model.js && git commit -m "feat: 加试探成本计算"
+# 第二次提交
+git add js/ui.js && git commit -m "feat: 试探清单表格"
+# 第三次提交
+git add index.html && git commit -m "style: 折叠原有推荐"
+# 一起合并
+git switch main
+git merge feature/explore-mode
+git push
+git branch -d feature/explore-mode
+```
+
+每个 commit 都是独立的存档点，合并时一起带进 main。
+
+## 十九、合并后删分支，模块还能找到吗
+
+能。**删分支只删指针，提交已经在 main 的历史里。**
+
+查找方式：
+
+```powershell
+git log --oneline --graph                 # 看整体历史
+git log --oneline -- js/ui.js             # 只看某个文件的历史
+git log --oneline --grep="试探"            # 按提交信息搜
+git show 9981b05                           # 看某次提交改了什么
+git blame js/ui.js                         # 每一行是谁哪次提交写的
+```
+
+一个差别：
+
+- **fast-forward 合并**：历史是直线，看不出“这个功能从哪到哪”
+- **`git merge --no-ff`**：强制生成一个合并提交，功能边界清楚
+
+想让某个版本好找，可以打 tag：
+
+```powershell
+git tag v1.0
+git push origin v1.0
+```
+
+tag 是给提交起的“版本名”，和 commit message 不是一回事。
+
+---
+
+# 第四阶段：数据存哪、UI 小坑、提交粒度
+
+## 二十、「保存配方」到底写到哪
+
+两层存储，别混：
+
+```text
+js/data.js（仓库文件，所有人共享）
+   │ 页面启动时读取（localStorage 没有配方时才用）
+   ▼
+localStorage（本浏览器）
+   │ 「保存配方」只写这里
+   ▼
+刷新后优先用 localStorage
+```
+
+结论：
+
+- 网页里点「保存配方」→ 只改自己浏览器，**不会改 `js/data.js`**
+- 想让所有人看到新的默认值 → 改 `js/data.js` → `commit` → `push`
+- 改完 `data.js` 后，本地要「恢复默认配方」→「保存配方」，否则旧 localStorage 会盖住新默认
+
+## 二十一、`hidden` 属性被 `display:flex` 覆盖
+
+现象：给 `<div class="row" hidden>` 加 hidden，元素还是显示。
+
+原因：浏览器默认样式 `[hidden]{display:none}` 的优先级低于作者样式 `.row{display:flex}`。
+
+解决：在 CSS 里补一条
+
+```css
+[hidden] { display: none !important; }
+```
+
+这个问题会让“解锁全部图鉴 / 获得指定花材”两个模式看起来同时生效。
+
+## 二十二、提交粒度怎么分
+
+原则：**一次提交一个主题**，但不必细到每个文件一行。
+
+这次可以拆成四个：
+
+```powershell
+git add js/data.js
+git commit -m "data: 移除不存在的 荣光×荣光 配方"
+
+git add css/style.css
+git commit -m "fix: 修复 hidden 被 display:flex 覆盖"
+
+git add js/ui.js
+git commit -m "feat: 种植区只显示本轮，完整需求折叠"
+
+git add docs/Git-实操记录.md
+git commit -m "docs: 记录数据存储与 hidden 覆盖问题"
+```
+
+判断标准：
+
+- 能用一个词概括（data / fix / feat / docs / refactor）→ 一次提交
+- 混了两个不相关的事 → 拆开
+- 拆到“每个文件一次”通常没必要
+
+## 二十三、`.docx` 之类的导出文件
+
+`git status` 里出现 `docs/*.docx`，是导出物，不是源码。
+
+- 想留档：`git add docs/*.docx` 一起提交
+- 不想留：在 `.gitignore` 加 `*.docx`，再 `git rm --cached`（如果已经加过）
+
+
+
