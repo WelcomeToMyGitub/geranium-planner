@@ -132,3 +132,6 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
 .dirty { color: var(--warn); font-size: 11.5px; }
 
 hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+
+/* hidden 属性优先级低于 .row{display:flex}，必须显式覆盖 */
+[hidden] { display: none !important; }
