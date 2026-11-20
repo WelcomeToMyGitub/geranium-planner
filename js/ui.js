@@ -20,7 +20,7 @@
     seedYield: 1,
     harvestYield: 2,
     coins: 0,
-    failReward: 4,
+    failReward: 0,
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
     targetCount: 1,
@@ -199,10 +199,11 @@
   function renderRecipes() {
     var t = $("#recipeTable");
     var h = "<thead><tr>" +
-      '<th style="width:13%">亲本 A</th><th style="width:13%">亲本 B</th>' +
-      '<th style="width:15%">产物 1</th><th style="width:8%">概率</th>' +
-      '<th style="width:15%">产物 2</th><th style="width:8%">概率</th>' +
-      '<th style="width:10%">成功率</th><th style="width:6%"></th></tr></thead><tbody>';
+      '<th style="width:12%">亲本 A</th><th style="width:12%">亲本 B</th>' +
+      '<th style="width:13%">产物 1</th><th style="width:7%">概率</th>' +
+      '<th style="width:13%">产物 2</th><th style="width:7%">概率</th>' +
+      '<th style="width:8%">成功率</th><th style="width:7%">成功币</th><th style="width:7%">失败币</th>' +
+      '<th style="width:5%"></th></tr></thead><tbody>';
 
     state.recipes.forEach(function (r, i) {
       var sVal = (r.s === null || r.s === undefined || !isFinite(r.s)) ? "" : r.s;
@@ -215,6 +216,8 @@
         '<td><input type="number" min="0" max="1" step="0.05" data-i="' + i + '" data-p="p2" value="' + (r.p2 || 0) + '"></td>' +
         '<td><input type="number" min="0.01" max="1" step="0.01" class="' + (sVal === "" ? "blank" : "") +
           '" data-i="' + i + '" data-p="s" value="' + sVal + '" placeholder="默认"></td>' +
+        '<td><input type="number" min="0" step="1" data-i="' + i + '" data-p="cs" value="' + (r.cs || 0) + '"></td>' +
+        '<td><input type="number" min="0" step="1" data-i="' + i + '" data-p="cf" value="' + (r.cf || 0) + '"></td>' +
         '<td><button class="mini" data-del="' + i + '">删</button></td></tr>';
     });
     t.innerHTML = h + "</tbody>";
@@ -590,11 +593,13 @@
   }
 
   function coinSection(res) {
-    var fails = 0;
+    var fails = 0, income = 0;
     res.steps.forEach(function (s) {
+      var cs = s.r.cs || 0;
+      var cf = (s.r.cf !== null && s.r.cf !== undefined) ? s.r.cf : state.failReward;
       fails += Math.max(0, s.attempts * (1 - s.s));
+      income += s.attempts * (s.s * cs + (1 - s.s) * cf);
     });
-    var income = fails * state.failReward;
     var avail = state.coins + income;
 
     var rows = [];
