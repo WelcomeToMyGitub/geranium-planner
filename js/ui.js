@@ -378,33 +378,45 @@
       plots
     );
 
-    var h = "<h3>① 全局种植计划</h3>";
+    var totalNeed = plantList.reduce(function (s, x) { return s + Math.ceil(x.n); }, 0);
+
+    var h = "<h3>① 种植</h3>";
     if (!plantList.length) {
       h += '<p class="empty">不需要种种子，现有花材够合。</p>';
-    } else {
-      h += "<table><thead><tr><th>#</th><th>花种</th><th>现在种</th><th>合成产出种子</th><th>合计</th><th>层级</th></tr></thead><tbody>";
-      plantList.forEach(function (x, i) {
-        h += "<tr><td>" + (i + 1) + "</td><td>" + esc(x.f) +
-          (x.d >= 2 ? '<span class="tag deep">关键</span>' : "") + "</td>" +
-          '<td class="mono">' + Math.ceil(x.now) + "</td>" +
-          '<td class="mono">' + Math.ceil(x.gen) + "</td>" +
-          '<td class="mono">' + Math.ceil(x.n) + "</td>" +
-          '<td class="mono">' + x.d + "</td></tr>";
-      });
-      h += "</tbody></table>";
+      return h;
+    }
 
-      var c = Math.ceil(res.plant["初遇"] || 0);
-      var m = Math.ceil(res.plant["谜题"] || 0);
-      h += '<p class="small muted">合计 ' + Math.ceil(res.totalSeed) + " 颗，铺满 " + plots +
-        " 格约 " + sch.rounds.length + " 轮。" +
-        ((c || m) ? ("基础种配比 初遇 " + c + " : 谜题 " + m + " ≈ " +
-          (m ? (c / m).toFixed(2) : "∞") + " : 1。") : "") + "</p>";
+    h += '<p class="small">总共要种 <b>' + totalNeed + "</b> 颗，" + plots +
+      " 块地约 <b>" + sch.rounds.length + "</b> 轮。本轮先种这些：</p>";
 
-      if (alloc.length) {
-        h += '<p class="small">本轮建议：' + alloc.map(function (o) {
+    var allocCnt = alloc.reduce(function (s, o) { return s + o.n; }, 0);
+    h += '<p>' + (alloc.length
+      ? alloc.map(function (o) {
           return '<span class="pill">' + esc(o.f) + " ×" + o.n + "</span>";
-        }).join(" ") + '<span class="muted">　稀有种子先各下 1 颗</span></p>';
-      }
+        }).join(" ")
+      : '<span class="muted">本轮没有可种的</span>') +
+      ' <span class="muted">（用地 ' + allocCnt + " / " + plots + "）</span></p>";
+
+    h += '<p class="small muted">需求是期望值：每一步都要 ÷ 成功率 ÷ 产物概率，链越深乘得越多。' +
+      "如果数字明显超出活动承受范围，先检查成功率是不是把“产物概率”当成了“成功率”。</p>";
+
+    h += '<details><summary>完整需求（按链深排序）</summary>' +
+      '<table style="margin-top:8px"><thead><tr><th>#</th><th>花种</th><th>现在种</th><th>合成产出种子</th><th>合计</th><th>层级</th></tr></thead><tbody>';
+    plantList.forEach(function (x, i) {
+      h += "<tr><td>" + (i + 1) + "</td><td>" + esc(x.f) +
+        (x.d >= 2 ? '<span class="tag deep">关键</span>' : "") + "</td>" +
+        '<td class="mono">' + Math.ceil(x.now) + "</td>" +
+        '<td class="mono">' + Math.ceil(x.gen) + "</td>" +
+        '<td class="mono">' + Math.ceil(x.n) + "</td>" +
+        '<td class="mono">' + x.d + "</td></tr>";
+    });
+    h += "</tbody></table></details>";
+
+    var c = Math.ceil(res.plant["初遇"] || 0);
+    var m = Math.ceil(res.plant["谜题"] || 0);
+    if (c || m) {
+      h += '<p class="small muted">基础种配比 初遇 ' + c + " : 谜题 " + m + " ≈ " +
+        (m ? (c / m).toFixed(2) : "∞") + " : 1。</p>";
     }
 
     return h;
@@ -511,7 +523,7 @@
   }
 
   function costSection(res) {
-    var h = '<details style="margin-top:14px"><summary>⑤ 每种花的最优路线 / 期望成本</summary>' +
+    var h = '<details style="margin-top:14px"><summary>每种花的最优路线 / 期望成本</summary>' +
       '<table style="margin-top:8px"><thead><tr><th>花</th><th>路线</th><th>成本</th><th>成功率</th><th>状态</th></tr></thead><tbody>';
     state.flowers.forEach(function (f) {
       if (f === "初遇" || f === "谜题") return;
@@ -543,7 +555,7 @@
       return { r: r, cost: cost, can: can };
     }).sort(function (a, b) { return a.cost - b.cost; });
 
-    var h = '<details style="margin-top:10px"><summary>⑥ 待测配方（' + unknown.length +
+    var h = '<details style="margin-top:10px"><summary>待测配方（' + unknown.length +
       ' 条，按试错成本排序）</summary>' +
       '<table style="margin-top:8px"><thead><tr><th>配方</th><th>成功率</th><th>试一次约耗</th><th>现在能试</th></tr></thead><tbody>';
     rows.forEach(function (x) {
@@ -568,6 +580,58 @@
         '<td class="mono">' + Math.ceil(x.baseCost) + "</td>" +
         '<td class="mono">' + x.rounds + "</td>" +
         "<td>" + (i === 0 ? '<span class="pill ok">推荐</span>' : "") + "</td></tr>";
+    });
+    h += "</tbody></table>";
+    return h;
+  }
+
+  function exploreSection(res) {
+    var availOf = function (f) {
+      return (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0);
+    };
+    var list = [];
+
+    state.recipes.forEach(function (r) {
+      var unknownOut = !r.o1;
+      var unknownS = (r.s === null || r.s === undefined || !isFinite(r.s));
+      if (!unknownOut && !unknownS) return;
+      if (!r.a || !r.b || r.a === "?" || r.b === "?") return;
+      if (state.flowers.indexOf(r.a) < 0 || state.flowers.indexOf(r.b) < 0) return;
+
+      var ca = res.cost[r.a], cb = res.cost[r.b];
+      var cost = (isFinite(ca) && isFinite(cb)) ? ca + cb : Infinity;
+      var can = availOf(r.a) >= 1 && availOf(r.b) >= 1;
+      var gain = unknownOut
+        ? ((r.p1 > 0 ? 1 : 0) + (r.p2 > 0 ? 1 : 0))
+        : 1;
+      list.push({ r: r, cost: cost, can: can, gain: gain, unknownOut: unknownOut });
+    });
+
+    list.sort(function (a, b) {
+      if (a.can !== b.can) return a.can ? -1 : 1;
+      var ra = a.cost / Math.max(1, a.gain);
+      var rb = b.cost / Math.max(1, b.gain);
+      return ra - rb;
+    });
+
+    var h = "<h3>最省钱的试探顺序</h3>";
+    if (!list.length) {
+      h += '<p class="empty">没有待测配方，配方表已经补全。</p>';
+      return h;
+    }
+    h += '<p class="small muted">按「能立刻试 → 试一次成本 ÷ 可能揭示数」排序。' +
+      '解锁一个未知产物后，它可能同时打通好几条链，试完把结果填回配方表，成本会自动重算。</p>';
+    h += "<table><thead><tr><th>#</th><th>配方</th><th>可能揭示</th><th>试一次成本</th><th>现在能试</th></tr></thead><tbody>";
+    list.slice(0, 10).forEach(function (x, i) {
+      var r = x.r;
+      var reveal = x.unknownOut
+        ? ("新产物" + (x.gain > 1 ? " ×2" : " ×1"))
+        : "成功率";
+      h += "<tr><td>" + (i + 1) + "</td>" +
+        '<td class="mono small">' + esc(r.a) + " × " + esc(r.b) + " → " + (r.o1 ? esc(r.o1) : "?") + "</td>" +
+        '<td class="small">' + reveal + "</td>" +
+        '<td class="mono">' + (isFinite(x.cost) ? M.fmt(x.cost) : "∞") + "</td>" +
+        "<td>" + (x.can ? '<span class="pill ok">可以</span>' : '<span class="pill">先攒材料</span>') + "</td></tr>";
     });
     h += "</tbody></table>";
     return h;
@@ -624,10 +688,21 @@
     }
 
     if (ranking) h += rankingTable(ranking, F, N);
-    h += plantingSection(res, plots, sch);
-    h += scheduleSection(sch);
-    h += synthSection(res);
-    h += canDoSection(res);
+
+    if (mode === "unlock") {
+      h += exploreSection(res);
+      h += '<details style="margin-top:14px"><summary>完整规划：种植 / 轮次 / 合成顺序</summary>';
+      h += plantingSection(res, plots, sch);
+      h += scheduleSection(sch);
+      h += synthSection(res);
+      h += "</details>";
+    } else {
+      h += plantingSection(res, plots, sch);
+      h += scheduleSection(sch);
+      h += synthSection(res);
+    }
+
+    h += '<details style="margin-top:10px"><summary>现在就能合的</summary>' + canDoSection(res) + "</details>";
     h += costSection(res);
     h += unknownSection(res);
 
