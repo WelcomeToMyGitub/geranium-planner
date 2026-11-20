@@ -19,6 +19,8 @@
     refund: 0,
     seedYield: 1,
     harvestYield: 2,
+    coins: 0,
+    failReward: 4,
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
     targetCount: 1,
@@ -54,6 +56,8 @@
         targetCount: state.targetCount,
         sortBy: state.sortBy,
         onlyLocked: state.onlyLocked,
+        coins: state.coins,
+        failReward: state.failReward,
         unlocked: Array.from(state.unlocked)
       }));
     } catch (e) {}
@@ -77,7 +81,7 @@
       var m = localStorage.getItem(LS_META) || localStorage.getItem("gp-meta-v3");
       if (m) {
         var mm = JSON.parse(m);
-        ["plots", "fallback", "seedYield", "harvestYield", "targetCount"].forEach(function (k) {
+        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "coins", "failReward"].forEach(function (k) {
           if (mm[k] !== undefined) state[k] = mm[k];
         });
         if (mm.refund !== undefined) state.refund = mm.refund;
@@ -585,6 +589,79 @@
     return h;
   }
 
+  function coinSection(res) {
+    var fails = 0;
+    res.steps.forEach(function (s) {
+      fails += Math.max(0, s.attempts * (1 - s.s));
+    });
+    var income = fails * state.failReward;
+    var avail = state.coins + income;
+
+    var rows = [];
+    state.flowers.forEach(function (f) {
+      var price = D.SEED_PRICE && D.SEED_PRICE[f];
+      if (!price) return;
+      var seeds = Math.ceil((res.plant[f] || 0) + (res.gen[f] || 0));
+      if (seeds <= 0) return;
+      var st = null;
+      res.steps.forEach(function (s) { if (s.f === f) st = s; });
+      var attempts = st ? st.attempts : 0;
+      var cost = seeds * price;
+      rows.push({
+        f: f, price: price, seeds: seeds, cost: cost,
+        attempts: attempts, perCoin: attempts / cost
+      });
+    });
+    rows.sort(function (a, b) { return b.perCoin - a.perCoin; });
+
+    var total = rows.reduce(function (s, x) { return s + x.cost; }, 0);
+
+    var h = "<h3>花花币</h3>";
+    h += '<div class="stat">' +
+      "<div><b>" + state.coins + "</b><span>初始</span></div>" +
+      "<div><b>" + Math.round(fails) + "</b><span>预计失败次数</span></div>" +
+      "<div><b>" + Math.round(income) + "</b><span>失败收入</span></div>" +
+      "<div><b>" + Math.round(avail) + "</b><span>可用合计</span></div>" +
+      "</div>";
+
+    if (!rows.length) {
+      h += '<p class="small muted">当前计划里没有已知价格的种子可买。</p>';
+      return h;
+    }
+
+    h += '<p class="small">买齐下表种子要 <b>' + Math.round(total) + "</b> 币，" +
+      (avail >= total
+        ? "够，可以全买。"
+        : "还差 <b>" + Math.round(total - avail) + "</b> 币。") + "</p>";
+    h += '<p class="small muted">这是“全买”的粗算：买了某一种，就不用再合成它，实际花费会更低。' +
+      "「每币省尝试」= 合成它的期望尝试 ÷ 全买花费，越大越值得先买。</p>";
+
+    h += "<table><thead><tr><th>#</th><th>买什么种子</th><th>单价</th><th>计划要种</th><th>全买花费</th><th>合成需尝试</th><th>每币省尝试</th></tr></thead><tbody>";
+    rows.forEach(function (x, i) {
+      h += "<tr><td>" + (i + 1) + "</td><td>" + esc(x.f) +
+        (i < 2 ? '<span class="tag deep">优先</span>' : "") + "</td>" +
+        '<td class="mono">' + x.price + "</td>" +
+        '<td class="mono">' + x.seeds + "</td>" +
+        '<td class="mono">' + Math.round(x.cost) + "</td>" +
+        '<td class="mono">' + Math.ceil(x.attempts) + "</td>" +
+        '<td class="mono">' + (isFinite(x.perCoin) ? x.perCoin.toFixed(2) : "0") + "</td></tr>";
+    });
+    h += "</tbody></table>";
+
+    if (avail < total) {
+      var acc = 0, buy = [];
+      rows.forEach(function (x) {
+        if (acc + x.cost <= avail) { acc += x.cost; buy.push(x.f); }
+      });
+      h += '<p class="small">按当前预算，建议先买：' +
+        (buy.length
+          ? buy.map(function (f) { return '<span class="pill">' + esc(f) + "</span>"; }).join(" ")
+          : "（不够买任何一种）") + "</p>";
+    }
+
+    return h;
+  }
+
   function exploreSection(res) {
     var availOf = function (f) {
       return (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0);
@@ -703,6 +780,7 @@
     }
 
     h += '<details style="margin-top:10px"><summary>现在就能合的</summary>' + canDoSection(res) + "</details>";
+    h += coinSection(res);
     h += costSection(res);
     h += unknownSection(res);
 
@@ -819,6 +897,14 @@
       state.harvestYield = Math.max(1, Math.round(num($("#harvestYield").value) || 1));
       saveMeta(); calc();
     });
+    $("#coins").addEventListener("change", function () {
+      state.coins = Math.max(0, Math.round(num($("#coins").value) || 0));
+      saveMeta(); calc();
+    });
+    $("#failReward").addEventListener("change", function () {
+      state.failReward = Math.max(0, Math.round(num($("#failReward").value) || 0));
+      saveMeta(); calc();
+    });
 
     document.addEventListener("keydown", function (e) {
       var tag = (e.target.tagName || "").toLowerCase();
@@ -842,6 +928,8 @@
     $("#refund").value = String(state.refund);
     $("#seedYield").value = state.seedYield;
     $("#harvestYield").value = state.harvestYield;
+    $("#coins").value = state.coins;
+    $("#failReward").value = state.failReward;
     bindEvents();
     renderAll();
     calc();
