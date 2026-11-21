@@ -22,7 +22,7 @@
     harvestYield: 2,
     coins: 0,
     failReward: 2,
-    useEarned: false,
+    useEarned: true,
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
     targetCount: 1,
@@ -825,6 +825,18 @@
       h += '<p class="small">买了：' + items.map(function (f) {
         return '<span class="pill">' + esc(f) + " ×" + bought[f] + "</span>";
       }).join(" ") + "</p>";
+
+      h += "<table><thead><tr><th>买什么</th><th>种子</th><th>花费</th><th>折合花朵</th><th>占地</th></tr></thead><tbody>";
+      items.forEach(function (f) {
+        var seeds = bought[f];
+        var price = (D.SEED_PRICE && D.SEED_PRICE[f]) || 0;
+        h += "<tr><td>" + esc(f) + "</td>" +
+          '<td class="mono">' + seeds + "</td>" +
+          '<td class="mono">' + (seeds * price) + "</td>" +
+          '<td class="mono">' + (seeds * state.harvestYield) + "</td>" +
+          '<td class="mono">' + seeds + "</td></tr>";
+      });
+      h += "</tbody></table>";
     } else {
       h += '<p class="small muted">预算不够买任何种子，全部靠种 / 合成。</p>';
     }
