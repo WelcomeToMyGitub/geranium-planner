@@ -31,7 +31,8 @@
           <button class="mini" id="btnImportSave">导入存档</button>
           <input type="file" id="fileSave" accept=".json,application/json" hidden />
         </div>
-        <p class="small muted">「存为默认库存」下载的 stock.js 覆盖 data/stock.js 后，任何新环境首次打开都用它；导出/导入是完整快照（库存 + 配方 + 设置）。</p>
+        <p class="small muted">默认库存文件在 <span class="mono">F:\P_Games\geranium-planner\data\stock.js</span>（仓库里就是 <span class="mono">data/stock.js</span>）。<br />
+        「存为默认库存」下载的 stock.js 覆盖它后，任何新环境首次打开都用它；导出/导入是完整快照（库存 + 配方 + 设置）。</p>
       </details>
     </section>
 
@@ -40,6 +41,8 @@
       <div class="row">
         <label class="small muted">地块数</label>
         <input type="number" id="plots" min="1" max="99" step="1" value="8" />
+        <label class="small muted ml">轮数上限</label>
+        <input type="number" id="roundLimit" min="1" max="99" step="1" value="20" />
         <label class="small muted ml">未知成功率默认</label>
         <input type="number" id="fallback" min="0.01" max="1" step="0.01" value="0.04" />
       </div>

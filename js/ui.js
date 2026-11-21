@@ -15,6 +15,7 @@
     recipes: clone(D.DEFAULT_RECIPES),
     stock: clone(D.DEFAULT_STOCK),
     plots: 8,
+    roundLimit: 20,
     fallback: 0.04,
     refund: 0,
     seedYield: 1,
@@ -55,6 +56,7 @@
     try {
       localStorage.setItem(LS_META, JSON.stringify({
         plots: state.plots,
+        roundLimit: state.roundLimit,
         fallback: state.fallback,
         refund: state.refund,
         seedYield: state.seedYield,
@@ -94,7 +96,7 @@
       var m = localStorage.getItem(LS_META) || localStorage.getItem("gp-meta-v3");
       if (m) {
         var mm = JSON.parse(m);
-        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "coins", "failReward"].forEach(function (k) {
+        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "coins", "failReward", "roundLimit"].forEach(function (k) {
           if (mm[k] !== undefined) state[k] = mm[k];
         });
         if (mm.refund !== undefined) state.refund = mm.refund;
@@ -651,7 +653,8 @@
     if (w.stuck.length) {
       h += '<div class="wave"><b>材料不够，先种/先买：</b> ' +
         w.stuck.map(function (x) {
-          return '<span class="pill bad">' + esc(x.f) + " 还差 " + x.left + " 次</span>";
+          return '<span class="pill bad">' + esc(x.f) + " 还差 " + x.left + " 次（需要 " +
+            esc(x.r.a) + "×" + x.left + " + " + esc(x.r.b) + "×" + x.left + "）</span>";
         }).join(" ") + "</div>";
     }
     return h;
@@ -960,6 +963,7 @@
     var plots = Math.max(1, Math.round(state.plots));
     var mode = state.targetMode;
     var res, ranking = null, F = null, N = 1;
+    var resNoBuy = null, schNoBuy = null, willBuy = false;
 
     if (mode === "flower") {
       F = state.targetFlower;
@@ -972,14 +976,20 @@
       }
       res = ranking[0].res;
     } else {
-      res = M.analyze(cfg(), 1);
-      if (!res.targets.length) {
+      var cfg0 = cfg();
+      cfg0.coinBudget = 0;
+      cfg0.useEarnedCoins = false;
+      resNoBuy = M.analyze(cfg0, 1);
+      if (!resNoBuy.targets.length) {
         box.innerHTML = '<p class="empty">图鉴已经全解锁了 🎉</p>';
         return;
       }
+      schNoBuy = M.schedule(cfg0, resNoBuy);
+      willBuy = state.coins > 0 && schNoBuy.rounds.length > state.roundLimit;
+      res = willBuy ? M.analyze(cfg(), 1) : resNoBuy;
     }
 
-    var sch = M.schedule(cfg(), res);
+    var sch = (mode === "unlock" && !willBuy) ? schNoBuy : M.schedule(cfg(), res);
 
     var h = "";
     if (mode === "flower") {
@@ -1003,6 +1013,16 @@
       h += '<p class="small muted">缺口：' + res.targets.map(function (f) {
         return '<span class="pill warn">' + esc(f) + "</span>";
       }).join(" ") + "</p>";
+    }
+
+    if (mode === "unlock" && schNoBuy) {
+      h += '<p class="small">不买种：<b>' + schNoBuy.rounds.length + "</b> 轮（上限 " + state.roundLimit + "）";
+      if (willBuy) {
+        h += "，超了，用 <b>" + state.coins + "</b> 币买种后降到 <b>" + sch.rounds.length + "</b> 轮。";
+      } else {
+        h += "，在上限内，建议先不买，把币留着。";
+      }
+      h += "</p>";
     }
 
     if (ranking) h += rankingTable(ranking, F, N);
@@ -1166,6 +1186,10 @@
       state.plots = Math.max(1, Math.round(num($("#plots").value) || 8));
       saveMeta(); calc();
     });
+    $("#roundLimit").addEventListener("change", function () {
+      state.roundLimit = Math.max(1, Math.round(num($("#roundLimit").value) || 20));
+      saveMeta(); calc();
+    });
     $("#fallback").addEventListener("change", function () {
       var v = num($("#fallback").value);
       state.fallback = isNaN(v) ? 0.04 : Math.min(1, Math.max(0.01, v));
@@ -1219,6 +1243,7 @@
   function init() {
     loadAll();
     $("#plots").value = state.plots;
+    $("#roundLimit").value = state.roundLimit;
     $("#fallback").value = state.fallback;
     $("#refund").value = String(state.refund);
     $("#seedYield").value = state.seedYield;
