@@ -115,7 +115,9 @@
     cfg.unlocked.forEach(function (f) { unlocked[f] = true; });
     var targets = opts.targets || flowers.filter(function (f) { return !unlocked[f]; });
 
-    var need = {}, plant = {}, gen = {}, used = {};
+    var need = {}, plant = {}, gen = {}, used = {}, bought = {};
+    var coinsSpent = 0, coinsEarned = 0;
+    var coinsAvail = cfg.coinBudget || 0;
     flowers.forEach(function (f) { need[f] = 0; plant[f] = 0; gen[f] = 0; });
     if (opts.demand) {
       Object.keys(opts.demand).forEach(function (f) {
@@ -162,6 +164,22 @@
       }
       if (need[f] <= 1e-9) return;
 
+      // 3.5 用花花币买种子
+      var price = cfg.seedPrice ? cfg.seedPrice[f] : 0;
+      if (price > 0 && coinsAvail >= price) {
+        var buySeeds = Math.ceil(need[f] / H);
+        var afford = Math.floor(coinsAvail / price);
+        var buy = Math.min(buySeeds, afford);
+        if (buy > 0) {
+          bought[f] = (bought[f] || 0) + buy;
+          coinsSpent += buy * price;
+          coinsAvail -= buy * price;
+          need[f] -= buy * H;
+          if (need[f] < 0) need[f] = 0;
+        }
+      }
+      if (need[f] <= 1e-9) return;
+
       // 4. 剩下的靠合成
       var r = choice[f];
       if (!r) return;
@@ -171,6 +189,12 @@
       var mult = (1 - cfg.refund * (1 - s)) / s;
       var successes = Math.max(1, Math.ceil(need[f] / perSuccess));
       var material = successes * mult / (p > 0 ? p : 1);
+
+      var cs = r.cs || 0;
+      var cf = (r.cf !== null && r.cf !== undefined) ? r.cf : (cfg.failReward || 0);
+      var income = material * (s * cs + (1 - s) * cf);
+      coinsEarned += income;
+      if (cfg.useEarnedCoins) coinsAvail += income;
 
       gen[f] += successes * cfg.seedYield;
       used[f] = { r: r, attempts: material, need: successes, s: s, p: p };
@@ -199,8 +223,9 @@
 
     return {
       cost: cost, choice: choice, depth: depth, targets: targets,
-      need: need, plant: plant, gen: gen, steps: steps,
-      totalSeed: totalSeed, rounds: rounds
+      need: need, plant: plant, gen: gen, bought: bought, steps: steps,
+      totalSeed: totalSeed, rounds: rounds,
+      coinsSpent: coinsSpent, coinsEarned: coinsEarned
     };
   }
 
@@ -236,7 +261,7 @@
     while (guard++ < 400) {
       if (remainSeeds() === 0 && remainSynth() === 0) break;
 
-      var planted = {}, producedSeeds = 0;
+      var planted = {}, producedSeeds = 0, synthActs = {};
 
       // 1. 先把能合的合掉（实验室不占地）
       var changed = true;
@@ -252,6 +277,7 @@
             seeds[st.f] += SY;
             st.left -= 1;
             producedSeeds += SY;
+            synthActs[st.f] = (synthActs[st.f] || 0) + 1;
             changed = true;
           }
         }
@@ -287,7 +313,7 @@
       });
 
       totalPlots += used;
-      rounds.push({ planted: planted, seeds: producedSeeds });
+      rounds.push({ planted: planted, seeds: producedSeeds, synth: synthActs });
 
       if (used === 0 && producedSeeds === 0) { stall = true; break; }
     }

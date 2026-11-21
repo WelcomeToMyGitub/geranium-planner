@@ -20,7 +20,8 @@
     seedYield: 1,
     harvestYield: 2,
     coins: 0,
-    failReward: 0,
+    failReward: 2,
+    useEarned: false,
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
     targetCount: 1,
@@ -58,6 +59,7 @@
         onlyLocked: state.onlyLocked,
         coins: state.coins,
         failReward: state.failReward,
+        useEarned: state.useEarned,
         unlocked: Array.from(state.unlocked)
       }));
     } catch (e) {}
@@ -89,6 +91,7 @@
         if (mm.onlyLocked !== undefined) state.onlyLocked = mm.onlyLocked;
         if (mm.targetFlower) state.targetFlower = mm.targetFlower;
         if (mm.sortBy) state.sortBy = mm.sortBy;
+        if (mm.useEarned !== undefined) state.useEarned = mm.useEarned;
         if (mm.unlocked) state.unlocked = new Set(mm.unlocked);
       }
       var r = localStorage.getItem(LS_RECIPES) || localStorage.getItem("gp-recipes-v3");
@@ -135,7 +138,7 @@
   // ---------- 库存 ----------
   function renderStock() {
     var t = $("#stockTable");
-    var h = "<thead><tr><th>花</th><th>花材</th><th>生长中</th><th>种子</th><th>图鉴</th></tr></thead><tbody>";
+    var h = "<thead><tr><th>花</th><th>花材</th><th>生长中</th><th>种子</th><th>价格</th><th>图鉴</th></tr></thead><tbody>";
     state.flowers.forEach(function (f) {
       var fl = state.stock.flower[f] || 0;
       var gr = state.stock.growing[f] || 0;
@@ -145,6 +148,7 @@
         '<td><input type="number" min="0" step="1" data-k="flower" data-f="' + esc(f) + '" value="' + fl + '"></td>' +
         '<td><input type="number" min="0" step="1" data-k="growing" data-f="' + esc(f) + '" value="' + gr + '"></td>' +
         '<td><input type="number" min="0" step="1" data-k="seed" data-f="' + esc(f) + '" value="' + sd + '"></td>' +
+        '<td class="mono small">' + ((D.SEED_PRICE && D.SEED_PRICE[f]) || "—") + "</td>" +
         '<td><button class="mini" data-unlock="' + esc(f) + '">' + (un ? "✓" : "点亮") + "</button></td></tr>";
     });
     t.innerHTML = h + "</tbody>";
@@ -288,7 +292,11 @@
       fallback: state.fallback,
       refund: state.refund,
       seedYield: state.seedYield,
-      harvestYield: state.harvestYield
+      harvestYield: state.harvestYield,
+      coinBudget: state.coins,
+      useEarnedCoins: state.useEarned,
+      seedPrice: D.SEED_PRICE || {},
+      failReward: state.failReward
     };
   }
 
@@ -463,19 +471,63 @@
       " 轮），共使用 <b>" + sch.totalPlots + "</b> 块地·次。" +
       (sch.stall ? ' <span class="pill bad">中途卡住：材料不够，检查配方</span>' : "") + "</p>";
 
-    h += '<details><summary>展开每轮种什么</summary>' +
-      '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>种什么</th><th>用地</th><th>本轮合成出种子</th></tr></thead><tbody>';
-    sch.rounds.forEach(function (r, i) {
+    function row(r, i) {
+      var sk = Object.keys(r.synth || {});
+      var synthPills = sk.map(function (f) {
+        return '<span class="pill">' + esc(f) + " ×" + r.synth[f] + "</span>";
+      }).join(" ") || '<span class="muted">—</span>';
       var keys = Object.keys(r.planted);
       var pills = keys.map(function (f) {
         return '<span class="pill">' + esc(f) + " ×" + r.planted[f] + "</span>";
       }).join(" ") || '<span class="muted">（空）</span>';
       var cnt = keys.reduce(function (s, f) { return s + r.planted[f]; }, 0);
-      h += "<tr><td>第 " + (i + 1) + " 轮</td><td>" + pills + "</td>" +
+      return "<tr><td>第 " + (i + 1) + " 轮</td><td>" + synthPills + "</td><td>" + pills + "</td>" +
         '<td class="mono">' + cnt + "</td>" +
         '<td class="mono">' + r.seeds + "</td></tr>";
-    });
-    h += "</tbody></table></details>";
+    }
+
+    h += '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成</th><th>再种</th><th>用地</th><th>产出种子</th></tr></thead><tbody>';
+    sch.rounds.slice(0, 2).forEach(function (r, i) { h += row(r, i); });
+    h += "</tbody></table>";
+
+    if (sch.rounds.length > 2) {
+      h += '<details><summary>第 3 轮及以后（还有 ' + (sch.rounds.length - 2) + ' 轮）</summary>' +
+        '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成</th><th>再种</th><th>用地</th><th>产出种子</th></tr></thead><tbody>';
+      sch.rounds.slice(2).forEach(function (r, i) { h += row(r, i + 2); });
+      h += "</tbody></table></details>";
+    }
+    return h;
+  }
+
+  function treeNode(f, res, depth, seen) {
+    var seeds = (res.plant[f] || 0) + (res.gen[f] || 0);
+    var bought = (res.bought && res.bought[f]) || 0;
+    var cls = "tnode";
+    if (seeds > 0.01) cls += " plant";
+    if (bought > 0) cls += " buy";
+    var tag = bought > 0 ? " 买×" + Math.ceil(bought) : (seeds > 0.01 ? " 种" : "");
+    var html = "<div class='" + cls + "'>" + esc(f) + tag + "</div>";
+
+    if (bought > 0) return html;
+    if (depth >= 3 || seen[f]) return html;
+    var r = res.choice[f];
+    if (!r) return html;
+
+    var nseen = {};
+    Object.keys(seen).forEach(function (k) { nseen[k] = true; });
+    nseen[f] = true;
+
+    return html + "<div class='tchildren'>" +
+      treeNode(r.a, res, depth + 1, nseen) +
+      treeNode(r.b, res, depth + 1, nseen) + "</div>";
+  }
+
+  function treeSection(res) {
+    if (!res.targets || !res.targets.length) return "";
+    var h = "<h3>合成树</h3>" +
+      '<p class="small muted">绿框 = 要种，橙框 = 用花花币买。只展开 3 层。</p><div class="tree">';
+    res.targets.forEach(function (t) { h += treeNode(t, res, 0, {}); });
+    h += "</div>";
     return h;
   }
 
@@ -589,6 +641,32 @@
         "<td>" + (i === 0 ? '<span class="pill ok">推荐</span>' : "") + "</td></tr>";
     });
     h += "</tbody></table>";
+    return h;
+  }
+
+  function purchaseSection(res) {
+    var spent = res.coinsSpent || 0;
+    var earned = res.coinsEarned || 0;
+    var bought = res.bought || {};
+    var items = Object.keys(bought).filter(function (f) { return bought[f] > 0; });
+
+    if (!items.length && spent <= 0 && earned <= 0) return "";
+
+    var h = "<h3>花花币决策</h3>";
+    h += '<div class="stat">' +
+      "<div><b>" + Math.round(state.coins) + "</b><span>可用预算</span></div>" +
+      "<div><b>" + Math.round(spent) + "</b><span>买种花费</span></div>" +
+      "<div><b>" + Math.round(earned) + "</b><span>合成获得</span></div>" +
+      "<div><b>" + (state.useEarned ? "可动用" : "不计入") + "</b><span>合成所得</span></div>" +
+      "</div>";
+
+    if (items.length) {
+      h += '<p class="small">买了：' + items.map(function (f) {
+        return '<span class="pill">' + esc(f) + " ×" + bought[f] + "</span>";
+      }).join(" ") + "</p>";
+    } else {
+      h += '<p class="small muted">预算不够买任何种子，全部靠种 / 合成。</p>';
+    }
     return h;
   }
 
@@ -785,7 +863,8 @@
     }
 
     h += '<details style="margin-top:10px"><summary>现在就能合的</summary>' + canDoSection(res) + "</details>";
-    h += coinSection(res);
+    h += treeSection(res);
+    h += purchaseSection(res);
     h += costSection(res);
     h += unknownSection(res);
 
@@ -801,6 +880,11 @@
   }
 
   function bindEvents() {
+    $("#btnSaveStock").addEventListener("click", function () {
+      saveStock(); saveMeta();
+      $("#stockSaved").textContent = "已保存 " + new Date().toLocaleTimeString();
+    });
+
     $("#btnCalc").addEventListener("click", calc);
     $("#btnUndo").addEventListener("click", doUndo);
     $("#btnRedo").addEventListener("click", doRedo);
@@ -906,6 +990,10 @@
       state.coins = Math.max(0, Math.round(num($("#coins").value) || 0));
       saveMeta(); calc();
     });
+    $("#useEarned").addEventListener("change", function () {
+      state.useEarned = $("#useEarned").checked;
+      saveMeta(); calc();
+    });
     $("#failReward").addEventListener("change", function () {
       state.failReward = Math.max(0, Math.round(num($("#failReward").value) || 0));
       saveMeta(); calc();
@@ -934,6 +1022,7 @@
     $("#seedYield").value = state.seedYield;
     $("#harvestYield").value = state.harvestYield;
     $("#coins").value = state.coins;
+    $("#useEarned").checked = state.useEarned;
     $("#failReward").value = state.failReward;
     bindEvents();
     renderAll();

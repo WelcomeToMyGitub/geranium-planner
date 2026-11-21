@@ -13,7 +13,14 @@
 
   <div class="grid">
     <section class="card">
-      <div class="flexhead"><h2>库存</h2><span class="pill" id="unlockPill"></span></div>
+      <div class="flexhead">
+        <h2>库存</h2>
+        <div class="row" style="margin:0">
+          <span id="stockSaved" class="muted small"></span>
+          <button class="mini" id="btnSaveStock">保存库存</button>
+          <span class="pill" id="unlockPill"></span>
+        </div>
+      </div>
       <table id="stockTable"></table>
       <p class="small muted">花材 = 已收在仓库；生长中 = 已种下未收；种子 = 还没种。</p>
     </section>
@@ -41,10 +48,8 @@
         <input type="number" id="harvestYield" min="1" max="10" step="1" value="2" />
       </div>
       <div class="row">
-        <label class="small muted">初始花花币</label>
-        <input type="number" id="coins" min="0" step="10" value="0" />
-        <label class="small muted ml">默认失败币（未填时）</label>
-        <input type="number" id="failReward" min="0" step="1" value="0" />
+        <label class="small muted">默认失败币（未填时）</label>
+        <input type="number" id="failReward" min="0" step="1" value="2" />
       </div>
       <p class="small muted">成功率是固定值，按配方表里填的算；留空才用默认值。</p>
       <hr />
@@ -99,6 +104,11 @@
         <option value="speed">速度（地块·轮最少）</option>
         <option value="safe">稳妥（总尝试次数最少）</option>
       </select>
+    </div>
+    <div class="row">
+      <label class="small muted">可用花花币</label>
+      <input type="number" id="coins" min="0" step="10" value="0" />
+      <label class="small"><input type="checkbox" id="useEarned" /> 可动用合成获得的花花币</label>
     </div>
     <p class="small muted" id="targetHint"></p>
   </section>
