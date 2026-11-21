@@ -44,6 +44,13 @@
   function saveStock() {
     try { localStorage.setItem(LS_STOCK, JSON.stringify(state.stock)); } catch (e) {}
   }
+  function syncStockFromDom() {
+    document.querySelectorAll("#stockTable input").forEach(function (inp) {
+      var k = inp.dataset.k, f = inp.dataset.f;
+      state.stock[k] = state.stock[k] || {};
+      state.stock[k][f] = Math.max(0, Math.round(num(inp.value) || 0));
+    });
+  }
   function saveMeta() {
     try {
       localStorage.setItem(LS_META, JSON.stringify({
@@ -154,12 +161,13 @@
     t.innerHTML = h + "</tbody>";
 
     t.querySelectorAll("input").forEach(function (inp) {
-      inp.addEventListener("change", function () {
+      inp.addEventListener("input", function () {
         var k = inp.dataset.k, f = inp.dataset.f;
         state.stock[k] = state.stock[k] || {};
         state.stock[k][f] = Math.max(0, Math.round(num(inp.value) || 0));
-        saveStock(); calc();
+        saveStock();
       });
+      inp.addEventListener("change", calc);
     });
     t.querySelectorAll("button[data-unlock]").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -252,6 +260,7 @@
     });
     renderDirty();
     renderRecipeToggle();
+    renderSearch();
   }
 
   // ---------- 目标 ----------
@@ -495,6 +504,88 @@
         '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成</th><th>再种</th><th>用地</th><th>产出种子</th></tr></thead><tbody>';
       sch.rounds.slice(2).forEach(function (r, i) { h += row(r, i + 2); });
       h += "</tbody></table></details>";
+    }
+    return h;
+  }
+
+  function renderSearch() {
+    var box = $("#recipeSearchResult");
+    var q = ($("#recipeSearch").value || "").trim();
+    if (!q) { box.innerHTML = ""; return; }
+
+    var hits = state.recipes.filter(function (r) {
+      return [r.a, r.b, r.o1, r.o2].some(function (x) { return x && x.indexOf(q) >= 0; });
+    });
+    if (!hits.length) {
+      box.innerHTML = '<p class="small muted">没有匹配的配方。</p>';
+      return;
+    }
+
+    var h = '<table style="margin:6px 0 10px"><thead><tr><th>配方</th><th>产物</th><th>成功率</th><th>成功币</th><th>失败币</th></tr></thead><tbody>';
+    hits.forEach(function (r) {
+      var outs = (r.o1 || "?") + (r.o2 ? " / " + r.o2 : "");
+      h += '<tr><td class="mono small">' + esc(r.a) + " × " + esc(r.b) + "</td>" +
+        '<td class="small">' + esc(outs) + "</td>" +
+        '<td class="mono">' + (r.s == null ? "?" : Math.round(r.s * 100) + "%") + "</td>" +
+        '<td class="mono">' + (r.cs || 0) + '</td><td class="mono">' + (r.cf || 0) + "</td></tr>";
+    });
+    box.innerHTML = h + "</tbody></table>";
+  }
+
+  function synthWaves(res) {
+    var avail = {};
+    state.flowers.forEach(function (f) {
+      avail[f] = (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0);
+    });
+
+    var pending = (res.steps || []).map(function (s) {
+      return {
+        f: s.f, r: s.r, left: Math.max(0, Math.ceil(s.need)),
+        depth: isFinite(s.depth) ? s.depth : 0
+      };
+    });
+
+    var waves = [];
+    for (var w = 0; w < 12; w++) {
+      var wave = [];
+      pending.forEach(function (st) {
+        if (st.left <= 0) return;
+        var n = Math.min(avail[st.r.a] || 0, avail[st.r.b] || 0, st.left);
+        if (n <= 0) return;
+        wave.push({ f: st.f, r: st.r, n: n, depth: st.depth });
+        avail[st.r.a] -= n;
+        avail[st.r.b] -= n;
+        avail[st.f] = (avail[st.f] || 0) + n;
+        st.left -= n;
+      });
+      if (!wave.length) break;
+      wave.sort(function (a, b) { return b.depth - a.depth; });
+      waves.push(wave);
+    }
+
+    var stuck = pending.filter(function (st) { return st.left > 0; });
+    return { waves: waves, stuck: stuck };
+  }
+
+  function waveSection(res) {
+    var w = synthWaves(res);
+    if (!w.waves.length && !w.stuck.length) return "";
+
+    var h = "<h3>按现在的材料，合成这样排</h3>";
+    h += '<p class="small muted">每波用上一波合出来的产物；同一波里，离最终目标近的排前面。材料不够的放最后。</p>';
+
+    w.waves.forEach(function (wave, i) {
+      h += '<div class="wave"><b>第 ' + (i + 1) + " 波" + (i === 0 ? "（现在就能合）" : "") + "：</b> " +
+        wave.map(function (x) {
+          return '<span class="pill">' + esc(x.r.a) + "×" + esc(x.r.b) + " → " + esc(x.f) + " ×" + x.n + "</span>";
+        }).join(" ") + "</div>";
+    });
+
+    if (w.stuck.length) {
+      h += '<div class="wave"><b>材料不够，先种/先买：</b> ' +
+        w.stuck.map(function (x) {
+          return '<span class="pill bad">' + esc(x.f) + " 还差 " + x.left + " 次</span>";
+        }).join(" ") + "</div>";
     }
     return h;
   }
@@ -863,6 +954,7 @@
     }
 
     h += '<details style="margin-top:10px"><summary>现在就能合的</summary>' + canDoSection(res) + "</details>";
+    h += waveSection(res);
     h += treeSection(res);
     h += purchaseSection(res);
     h += costSection(res);
@@ -880,9 +972,12 @@
   }
 
   function bindEvents() {
+    $("#recipeSearch").addEventListener("input", renderSearch);
     $("#btnSaveStock").addEventListener("click", function () {
+      syncStockFromDom();
       saveStock(); saveMeta();
       $("#stockSaved").textContent = "已保存 " + new Date().toLocaleTimeString();
+      calc();
     });
 
     $("#btnCalc").addEventListener("click", calc);
@@ -1007,10 +1102,15 @@
     });
 
     window.addEventListener("beforeunload", function (e) {
+      saveStock(); saveMeta();
       if (JSON.stringify(state.recipes) !== savedRecipes) {
         e.preventDefault();
         e.returnValue = "";
       }
+    });
+    window.addEventListener("pagehide", function () { saveStock(); saveMeta(); });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") { saveStock(); saveMeta(); }
     });
   }
 
