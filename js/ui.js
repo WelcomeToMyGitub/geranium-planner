@@ -15,7 +15,7 @@
     recipes: clone(D.DEFAULT_RECIPES),
     stock: clone(D.DEFAULT_STOCK),
     plots: 8,
-    fallback: 0.30,
+    fallback: 0.04,
     refund: 0,
     seedYield: 1,
     harvestYield: 2,
@@ -86,6 +86,10 @@
         state.stock.flower = d.flower || {};
         state.stock.growing = d.growing || {};
         state.stock.seed = d.seed || {};
+      } else if (window.GP_ADMIN_STOCK) {
+        state.stock.flower = clone(window.GP_ADMIN_STOCK.flower || {});
+        state.stock.growing = clone(window.GP_ADMIN_STOCK.growing || {});
+        state.stock.seed = clone(window.GP_ADMIN_STOCK.seed || {});
       }
       var m = localStorage.getItem(LS_META) || localStorage.getItem("gp-meta-v3");
       if (m) {
@@ -143,6 +147,64 @@
   }
 
   // ---------- 库存 ----------
+  function download(name, text) {
+    var blob = new Blob([text], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+
+  function saveSnapshot() {
+    return {
+      v: 1,
+      savedAt: new Date().toISOString(),
+      stock: state.stock,
+      recipes: state.recipes,
+      meta: {
+        plots: state.plots, fallback: state.fallback, refund: state.refund,
+        seedYield: state.seedYield, harvestYield: state.harvestYield,
+        coins: state.coins, failReward: state.failReward, useEarned: state.useEarned,
+        targetMode: state.targetMode, targetFlower: state.targetFlower,
+        targetCount: state.targetCount, sortBy: state.sortBy, onlyLocked: state.onlyLocked,
+        unlocked: Array.from(state.unlocked)
+      }
+    };
+  }
+
+  function applySnapshot(d) {
+    if (d.stock) {
+      state.stock.flower = d.stock.flower || {};
+      state.stock.growing = d.stock.growing || {};
+      state.stock.seed = d.stock.seed || {};
+    }
+    if (d.recipes) state.recipes = d.recipes;
+    if (d.meta) {
+      var m = d.meta;
+      ["plots", "fallback", "refund", "seedYield", "harvestYield", "coins", "failReward", "targetCount"].forEach(function (k) {
+        if (m[k] !== undefined) state[k] = m[k];
+      });
+      if (m.useEarned !== undefined) state.useEarned = m.useEarned;
+      if (m.targetMode) state.targetMode = m.targetMode;
+      if (m.targetFlower) state.targetFlower = m.targetFlower;
+      if (m.sortBy) state.sortBy = m.sortBy;
+      if (m.onlyLocked !== undefined) state.onlyLocked = m.onlyLocked;
+      if (m.unlocked) state.unlocked = new Set(m.unlocked);
+    }
+    saveStock(); saveMeta();
+    savedRecipes = JSON.stringify(state.recipes);
+    $("#plots").value = state.plots;
+    $("#fallback").value = state.fallback;
+    $("#refund").value = String(state.refund);
+    $("#seedYield").value = state.seedYield;
+    $("#harvestYield").value = state.harvestYield;
+    $("#coins").value = state.coins;
+    $("#failReward").value = state.failReward;
+    $("#useEarned").checked = state.useEarned;
+    renderAll(); calc();
+  }
+
   function renderStock() {
     var t = $("#stockTable");
     var h = "<thead><tr><th>花</th><th>花材</th><th>生长中</th><th>种子</th><th>价格</th><th>图鉴</th></tr></thead><tbody>";
@@ -166,6 +228,11 @@
         state.stock[k] = state.stock[k] || {};
         state.stock[k][f] = Math.max(0, Math.round(num(inp.value) || 0));
         saveStock();
+        if (state.stock[k][f] > 0 && !state.unlocked.has(f)) {
+          state.unlocked.add(f);
+          saveMeta();
+          renderUnlock();
+        }
       });
       inp.addEventListener("change", calc);
     });
@@ -939,23 +1006,18 @@
     }
 
     if (ranking) h += rankingTable(ranking, F, N);
+    if (mode === "unlock") h += exploreSection(res);
 
-    if (mode === "unlock") {
-      h += exploreSection(res);
-      h += '<details style="margin-top:14px"><summary>完整规划：种植 / 轮次 / 合成顺序</summary>';
-      h += plantingSection(res, plots, sch);
-      h += scheduleSection(sch);
-      h += synthSection(res);
-      h += "</details>";
-    } else {
-      h += plantingSection(res, plots, sch);
-      h += scheduleSection(sch);
-      h += synthSection(res);
-    }
+    h += waveSection(res);
+    h += plantingSection(res, plots, sch);
+
+    h += '<details style="margin-top:12px"><summary>后续轮次与完整计划</summary>';
+    h += scheduleSection(sch);
+    h += synthSection(res);
+    h += treeSection(res);
+    h += "</details>";
 
     h += '<details style="margin-top:10px"><summary>现在就能合的</summary>' + canDoSection(res) + "</details>";
-    h += waveSection(res);
-    h += treeSection(res);
     h += purchaseSection(res);
     h += costSection(res);
     h += unknownSection(res);
@@ -980,7 +1042,39 @@
       calc();
     });
 
-    $("#btnCalc").addEventListener("click", calc);
+    $("#btnExportSave").addEventListener("click", function () {
+      download("geranium-save.json", JSON.stringify(saveSnapshot(), null, 2));
+    });
+
+    $("#btnAdminStock").addEventListener("click", function () {
+      syncStockFromDom();
+      saveStock();
+      var text = "// generated " + new Date().toISOString() + "\nwindow.GP_ADMIN_STOCK = " +
+        JSON.stringify(state.stock, null, 2) + ";\n";
+      download("stock.js", text);
+      $("#stockSaved").textContent = "已下载 stock.js，覆盖 data/stock.js 即可";
+    });
+
+    $("#btnImportSave").addEventListener("click", function () { $("#fileSave").click(); });
+    $("#fileSave").addEventListener("change", function (e) {
+      var f = e.target.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          applySnapshot(JSON.parse(reader.result));
+          $("#stockSaved").textContent = "存档已导入 " + new Date().toLocaleTimeString();
+        } catch (err) { alert("导入失败：" + err.message); }
+      };
+      reader.readAsText(f);
+      e.target.value = "";
+    });
+
+    $("#btnCalc").addEventListener("click", function () {
+      syncStockFromDom();
+      saveStock();
+      calc();
+    });
     $("#btnUndo").addEventListener("click", doUndo);
     $("#btnRedo").addEventListener("click", doRedo);
     $("#btnSave").addEventListener("click", saveRecipes);
@@ -1001,6 +1095,14 @@
       pushUndo();
       state.recipes = clone(D.DEFAULT_RECIPES);
       renderRecipes(); calc();
+    });
+
+    $("#btnSyncUnlock").addEventListener("click", function () {
+      state.flowers.forEach(function (f) {
+        var n = (state.stock.flower[f] || 0) + (state.stock.growing[f] || 0) + (state.stock.seed[f] || 0);
+        if (n > 0) state.unlocked.add(f);
+      });
+      saveMeta(); renderAll(); calc();
     });
 
     $("#btnAll").addEventListener("click", function () {
@@ -1066,7 +1168,7 @@
     });
     $("#fallback").addEventListener("change", function () {
       var v = num($("#fallback").value);
-      state.fallback = isNaN(v) ? 0.3 : Math.min(1, Math.max(0.01, v));
+      state.fallback = isNaN(v) ? 0.04 : Math.min(1, Math.max(0.01, v));
       saveMeta(); calc();
     });
     $("#refund").addEventListener("change", function () {
