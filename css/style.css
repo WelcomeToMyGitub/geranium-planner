@@ -151,3 +151,5 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .tnode.buy { border-color: var(--warn); color: var(--warn); }
 
 .wave { margin: 6px 0; font-size: 12.5px; line-height: 1.9; }
+
+h4 { font-size: 12.5px; margin: 10px 0 4px; color: var(--muted); font-weight: 500; }

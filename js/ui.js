@@ -499,7 +499,7 @@
 
     var totalNeed = plantList.reduce(function (s, x) { return s + Math.ceil(x.n); }, 0);
 
-    var h = "<h3>① 种植</h3>";
+    var h = "<h3>④ 本轮种什么（≤ " + plots + " 格）</h3>";
     if (!plantList.length) {
       h += '<p class="empty">不需要种种子，现有花材够合。</p>';
       return h;
@@ -515,6 +515,12 @@
         }).join(" ")
       : '<span class="muted">本轮没有可种的</span>') +
       ' <span class="muted">（用地 ' + allocCnt + " / " + plots + "）</span></p>";
+
+    var free = Math.max(0, plots - allocCnt);
+    if (free > 0) {
+      h += '<p class="small muted">还剩 ' + free + ' 格：本轮已经没有“必须种”的种子了，' +
+        "可以先空着，或者加种初遇 / 谜题囤货。</p>";
+    }
 
     h += '<p class="small muted">需求是期望值：每一步都要 ÷ 成功率 ÷ 产物概率，链越深乘得越多。' +
       "如果数字明显超出活动承受范围，先检查成功率是不是把“产物概率”当成了“成功率”。</p>";
@@ -1215,7 +1221,10 @@
     }
 
     if (ranking) h += rankingTable(ranking, F, N);
-    if (mode === "unlock") h += exploreSection(res);
+    if (mode === "unlock") {
+      h += '<details style="margin-top:8px"><summary>试探顺序（补配方用，可先不看）</summary>' +
+        exploreSection(res) + "</details>";
+    }
 
     if (mode === "unlock") h += targetRecommendSection();
     h += stageSection(res, sch);
@@ -1227,7 +1236,6 @@
     h += treeSection(res);
     h += "</details>";
 
-    h += '<details style="margin-top:10px"><summary>现在就能合的</summary>' + canDoSection(res) + "</details>";
     h += purchaseSection(res);
     h += costSection(res);
     h += unknownSection(res);
