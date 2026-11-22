@@ -22,6 +22,7 @@
     harvestYield: 2,
     coins: 0,
     failReward: 2,
+    maxBuy: 3,
     useEarned: true,
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
@@ -68,6 +69,7 @@
         onlyLocked: state.onlyLocked,
         coins: state.coins,
         failReward: state.failReward,
+        maxBuy: state.maxBuy,
         useEarned: state.useEarned,
         unlocked: Array.from(state.unlocked)
       }));
@@ -96,7 +98,7 @@
       var m = localStorage.getItem(LS_META) || localStorage.getItem("gp-meta-v3");
       if (m) {
         var mm = JSON.parse(m);
-        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "coins", "failReward", "roundLimit"].forEach(function (k) {
+        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "coins", "failReward", "roundLimit", "maxBuy"].forEach(function (k) {
           if (mm[k] !== undefined) state[k] = mm[k];
         });
         if (mm.refund !== undefined) state.refund = mm.refund;
@@ -167,7 +169,7 @@
       meta: {
         plots: state.plots, fallback: state.fallback, refund: state.refund,
         seedYield: state.seedYield, harvestYield: state.harvestYield,
-        coins: state.coins, failReward: state.failReward, useEarned: state.useEarned,
+        coins: state.coins, failReward: state.failReward, maxBuy: state.maxBuy, useEarned: state.useEarned,
         targetMode: state.targetMode, targetFlower: state.targetFlower,
         targetCount: state.targetCount, sortBy: state.sortBy, onlyLocked: state.onlyLocked,
         unlocked: Array.from(state.unlocked)
@@ -184,7 +186,7 @@
     if (d.recipes) state.recipes = d.recipes;
     if (d.meta) {
       var m = d.meta;
-      ["plots", "fallback", "refund", "seedYield", "harvestYield", "coins", "failReward", "targetCount"].forEach(function (k) {
+      ["plots", "fallback", "refund", "seedYield", "harvestYield", "coins", "failReward", "targetCount", "maxBuy", "roundLimit"].forEach(function (k) {
         if (m[k] !== undefined) state[k] = m[k];
       });
       if (m.useEarned !== undefined) state.useEarned = m.useEarned;
@@ -203,6 +205,7 @@
     $("#harvestYield").value = state.harvestYield;
     $("#coins").value = state.coins;
     $("#failReward").value = state.failReward;
+    $("#maxBuy").value = state.maxBuy;
     $("#useEarned").checked = state.useEarned;
     renderAll(); calc();
   }
@@ -288,6 +291,8 @@
 
     state.recipes.forEach(function (r, i) {
       var sVal = (r.s === null || r.s === undefined || !isFinite(r.s)) ? "" : r.s;
+      var csVal = (r.cs === null || r.cs === undefined) ? "" : r.cs;
+      var cfVal = (r.cf === null || r.cf === undefined) ? "" : r.cf;
       h += "<tr>" +
         '<td><select data-i="' + i + '" data-p="a">' + flowerOptions(r.a) + "</select></td>" +
         '<td><select data-i="' + i + '" data-p="b">' + flowerOptions(r.b) + "</select></td>" +
@@ -297,8 +302,8 @@
         '<td><input type="number" min="0" max="1" step="0.05" data-i="' + i + '" data-p="p2" value="' + (r.p2 || 0) + '"></td>' +
         '<td><input type="number" min="0.01" max="1" step="0.01" class="' + (sVal === "" ? "blank" : "") +
           '" data-i="' + i + '" data-p="s" value="' + sVal + '" placeholder="默认"></td>' +
-        '<td><input type="number" min="0" step="1" data-i="' + i + '" data-p="cs" value="' + (r.cs || 0) + '"></td>' +
-        '<td><input type="number" min="0" step="1" data-i="' + i + '" data-p="cf" value="' + (r.cf || 0) + '"></td>' +
+        '<td><input type="number" min="0" step="1" data-i="' + i + '" data-p="cs" value="' + csVal + '" placeholder="2"></td>' +
+        '<td><input type="number" min="0" step="1" data-i="' + i + '" data-p="cf" value="' + cfVal + '" placeholder="2"></td>' +
         '<td><button class="mini" data-del="' + i + '">删</button></td></tr>';
     });
     t.innerHTML = h + "</tbody>";
@@ -374,7 +379,8 @@
       coinBudget: state.coins,
       useEarnedCoins: state.useEarned,
       seedPrice: D.SEED_PRICE || {},
-      failReward: state.failReward
+      failReward: state.failReward,
+      maxBuy: state.maxBuy
     };
   }
 
@@ -596,7 +602,7 @@
       h += '<tr><td class="mono small">' + esc(r.a) + " × " + esc(r.b) + "</td>" +
         '<td class="small">' + esc(outs) + "</td>" +
         '<td class="mono">' + (r.s == null ? "?" : Math.round(r.s * 100) + "%") + "</td>" +
-        '<td class="mono">' + (r.cs || 0) + '</td><td class="mono">' + (r.cf || 0) + "</td></tr>";
+        '<td class="mono">' + (r.cs !== null && r.cs !== undefined ? r.cs : 2) + '</td><td class="mono">' + (r.cf !== null && r.cf !== undefined ? r.cf : 2) + "</td></tr>";
     });
     box.innerHTML = h + "</tbody></table>";
   }
@@ -1229,6 +1235,10 @@
     });
     $("#failReward").addEventListener("change", function () {
       state.failReward = Math.max(0, Math.round(num($("#failReward").value) || 0));
+      saveMeta(); calc();
+    });
+    $("#maxBuy").addEventListener("change", function () {
+      state.maxBuy = Math.max(0, Math.round(num($("#maxBuy").value) || 0));
       saveMeta(); calc();
     });
 

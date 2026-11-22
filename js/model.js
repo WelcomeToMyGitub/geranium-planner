@@ -116,8 +116,9 @@
     var targets = opts.targets || flowers.filter(function (f) { return !unlocked[f]; });
 
     var need = {}, plant = {}, gen = {}, used = {}, bought = {};
-    var coinsSpent = 0, coinsEarned = 0;
+    var coinsSpent = 0, coinsEarned = 0, boughtTotal = 0;
     var coinsAvail = cfg.coinBudget || 0;
+    var maxBuy = (cfg.maxBuy && cfg.maxBuy > 0) ? cfg.maxBuy : Infinity;
     flowers.forEach(function (f) { need[f] = 0; plant[f] = 0; gen[f] = 0; });
     if (opts.demand) {
       Object.keys(opts.demand).forEach(function (f) {
@@ -169,11 +170,13 @@
       if (price > 0 && coinsAvail >= price) {
         var buySeeds = Math.ceil(need[f] / H);
         var afford = Math.floor(coinsAvail / price);
-        var buy = Math.min(buySeeds, afford);
+        var room = maxBuy - boughtTotal;
+        var buy = Math.min(buySeeds, afford, room);
         if (buy > 0) {
           bought[f] = (bought[f] || 0) + buy;
           coinsSpent += buy * price;
           coinsAvail -= buy * price;
+          boughtTotal += buy;
           need[f] -= buy * H;
           if (need[f] < 0) need[f] = 0;
         }
@@ -190,8 +193,9 @@
       var successes = Math.max(1, Math.ceil(need[f] / perSuccess));
       var material = successes * mult / (p > 0 ? p : 1);
 
-      var cs = r.cs || 0;
-      var cf = (r.cf !== null && r.cf !== undefined) ? r.cf : (cfg.failReward || 0);
+      var defCoin = (cfg.failReward !== null && cfg.failReward !== undefined) ? cfg.failReward : 2;
+      var cs = (r.cs !== null && r.cs !== undefined) ? r.cs : defCoin;
+      var cf = (r.cf !== null && r.cf !== undefined) ? r.cf : defCoin;
       var income = material * (s * cs + (1 - s) * cf);
       coinsEarned += income;
       if (cfg.useEarnedCoins) coinsAvail += income;
