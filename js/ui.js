@@ -27,6 +27,7 @@
     targetMode: "unlock",
     targetFlower: "天鹅初恋",
     targetCount: 1,
+    unlockCount: 0,
     sortBy: "cost",
     onlyLocked: true
   };
@@ -65,6 +66,7 @@
         targetMode: state.targetMode,
         targetFlower: state.targetFlower,
         targetCount: state.targetCount,
+        unlockCount: state.unlockCount,
         sortBy: state.sortBy,
         onlyLocked: state.onlyLocked,
         coins: state.coins,
@@ -98,7 +100,7 @@
       var m = localStorage.getItem(LS_META) || localStorage.getItem("gp-meta-v3");
       if (m) {
         var mm = JSON.parse(m);
-        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "coins", "failReward", "roundLimit", "maxBuy"].forEach(function (k) {
+        ["plots", "fallback", "seedYield", "harvestYield", "targetCount", "unlockCount", "coins", "failReward", "roundLimit", "maxBuy"].forEach(function (k) {
           if (mm[k] !== undefined) state[k] = mm[k];
         });
         if (mm.refund !== undefined) state.refund = mm.refund;
@@ -171,10 +173,22 @@
         seedYield: state.seedYield, harvestYield: state.harvestYield,
         coins: state.coins, failReward: state.failReward, maxBuy: state.maxBuy, useEarned: state.useEarned,
         targetMode: state.targetMode, targetFlower: state.targetFlower,
-        targetCount: state.targetCount, sortBy: state.sortBy, onlyLocked: state.onlyLocked,
+        targetCount: state.targetCount,
+        unlockCount: state.unlockCount, sortBy: state.sortBy, onlyLocked: state.onlyLocked,
         unlocked: Array.from(state.unlocked)
       }
     };
+  }
+
+  function parseSave(text) {
+    var t = String(text).trim();
+    if (!t) throw new Error("文件是空的");
+    if (t.charAt(0) === "{") return JSON.parse(t);
+
+    var m = t.match(/GP_ADMIN_STOCK\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
+    if (m) return { stock: JSON.parse(m[1]) };
+
+    throw new Error("无法识别：既不是存档 JSON，也不是 stock.js");
   }
 
   function applySnapshot(d) {
@@ -182,6 +196,10 @@
       state.stock.flower = d.stock.flower || {};
       state.stock.growing = d.stock.growing || {};
       state.stock.seed = d.stock.seed || {};
+    } else if (d.flower || d.growing || d.seed) {
+      state.stock.flower = d.flower || {};
+      state.stock.growing = d.growing || {};
+      state.stock.seed = d.seed || {};
     }
     if (d.recipes) state.recipes = d.recipes;
     if (d.meta) {
@@ -354,6 +372,8 @@
       r.checked = (r.value === state.targetMode);
     });
     $("#flowerTargetRow").hidden = state.targetMode !== "flower";
+    $("#unlockCountRow").hidden = state.targetMode !== "unlock";
+    $("#unlockCount").value = state.unlockCount;
     $("#targetCount").value = state.targetCount;
     $("#sortBy").value = state.sortBy;
     $("#onlyLocked").checked = state.onlyLocked;
@@ -640,6 +660,150 @@
 
     var stuck = pending.filter(function (st) { return st.left > 0; });
     return { waves: waves, stuck: stuck };
+  }
+
+  function canDoList(counts) {
+    var list = [];
+    state.recipes.forEach(function (r) {
+      if (!r.a || !r.b || r.a === "?" || r.b === "?") return;
+      if (state.flowers.indexOf(r.a) < 0 || state.flowers.indexOf(r.b) < 0) return;
+      var n = Math.min(counts[r.a] || 0, counts[r.b] || 0);
+      if (n < 1) return;
+      list.push({ r: r, n: n });
+    });
+    list.sort(function (a, b) { return b.n - a.n; });
+    return list;
+  }
+
+  function rankTargets() {
+    var missing = state.flowers.filter(function (f) { return !state.unlocked.has(f); });
+    return missing.map(function (f) {
+      var d = {};
+      d[f] = 1;
+      var r = M.analyze(cfg(), 1, { demand: d, targets: [f] });
+      var s = M.schedule(cfg(), r);
+      return { f: f, rounds: s.rounds.length, seeds: Math.ceil(r.totalSeed) };
+    }).sort(function (a, b) {
+      return (a.rounds - b.rounds) || (a.seeds - b.seeds);
+    });
+  }
+
+  function targetRecommendSection() {
+    var rows = rankTargets();
+    if (!rows.length) return "";
+    var count = state.unlockCount > 0 ? Math.min(state.unlockCount, rows.length) : rows.length;
+
+    var h = "<h3>按目标分开看（越靠前越容易）</h3>";
+    h += "<table><thead><tr><th>#</th><th>目标</th><th>轮数</th><th>种子</th><th></th></tr></thead><tbody>";
+    rows.forEach(function (x, i) {
+      h += "<tr><td>" + (i + 1) + "</td><td>" + esc(x.f) + "</td>" +
+        '<td class="mono">' + x.rounds + "</td>" +
+        '<td class="mono">' + x.seeds + "</td>" +
+        "<td>" + (i < count ? '<span class="pill ok">本次选它</span>' : "") + "</td></tr>";
+    });
+    h += "</tbody></table>";
+    return h;
+  }
+
+  function stageSection(res, sch) {
+    var H = Math.max(1, state.harvestYield);
+
+    var now = {};
+    state.flowers.forEach(function (f) { now[f] = state.stock.flower[f] || 0; });
+
+    var r0 = sch.rounds[0] ? sch.rounds[0].planted : {};
+    var after = {};
+    state.flowers.forEach(function (f) {
+      after[f] = (now[f] || 0) + (state.stock.growing[f] || 0) + (r0[f] || 0) * H;
+    });
+
+    function allocate(counts) {
+      var avail = {};
+      state.flowers.forEach(function (f) { avail[f] = counts[f] || 0; });
+
+      var acts = [];
+      var steps = (res.steps || []).map(function (s) {
+        return { f: s.f, r: s.r, left: Math.max(0, Math.ceil(s.need)), depth: s.depth || 0 };
+      }).sort(function (a, b) { return b.depth - a.depth; });
+
+      steps.forEach(function (st) {
+        var n = Math.min(avail[st.r.a] || 0, avail[st.r.b] || 0, st.left);
+        if (n <= 0) return;
+        acts.push({ f: st.f, r: st.r, n: n });
+        avail[st.r.a] -= n;
+        avail[st.r.b] -= n;
+      });
+
+      return { acts: acts, avail: avail };
+    }
+
+    function actsHtml(acts) {
+      if (!acts.length) return '<p class="small muted">没有能合的。</p>';
+      return '<p class="small">' + acts.slice(0, 12).map(function (x) {
+        return '<span class="pill">' + esc(x.r.a) + "×" + esc(x.r.b) + " → " + esc(x.f) + " ×" + x.n + "</span>";
+      }).join(" ") + "</p>";
+    }
+    function restHtml(avail) {
+      var parts = [];
+      state.flowers.forEach(function (f) {
+        if ((avail[f] || 0) > 0) parts.push(esc(f) + "×" + avail[f]);
+      });
+      return parts.length ? '<p class="small muted">没用上：' + parts.join("、") + "</p>" : "";
+    }
+    function plantHtml(p) {
+      var keys = Object.keys(p);
+      if (!keys.length) return '<p class="small muted">没有。</p>';
+      return '<p class="small">' + keys.map(function (f) {
+        return '<span class="pill">' + esc(f) + " ×" + p[f] + "</span>";
+      }).join(" ") + "</p>";
+    }
+
+    var a1 = allocate(now);
+    var a2 = allocate(after);
+
+    // 下一轮真正能种的种子：库存 + 这轮合成产出 + 还能买到的
+    var seedAvail = {};
+    state.flowers.forEach(function (f) { seedAvail[f] = state.stock.seed[f] || 0; });
+
+    var p0 = sch.rounds[0] ? sch.rounds[0].planted : {};
+    Object.keys(p0).forEach(function (f) {
+      seedAvail[f] = Math.max(0, (seedAvail[f] || 0) - p0[f]);
+    });
+    var s0 = sch.rounds[0] ? sch.rounds[0].synth : {};
+    Object.keys(s0).forEach(function (f) {
+      seedAvail[f] = (seedAvail[f] || 0) + s0[f] * state.seedYield;
+    });
+
+    var coinsLeft = state.coins - (res.coinsSpent || 0);
+    state.flowers.forEach(function (f) {
+      var price = D.SEED_PRICE && D.SEED_PRICE[f];
+      if (price && coinsLeft >= price) {
+        var n = Math.floor(coinsLeft / price);
+        seedAvail[f] = (seedAvail[f] || 0) + n;
+        coinsLeft -= n * price;
+      }
+    });
+    seedAvail["初遇"] = Infinity;
+    seedAvail["谜题"] = Infinity;
+
+    var want = sch.rounds[1] ? sch.rounds[1].planted : {};
+    var canPlant = {}, notYet = {};
+    Object.keys(want).forEach(function (f) {
+      var haveN = Math.floor(seedAvail[f] || 0);
+      var take = Math.min(want[f], haveN);
+      if (take > 0) canPlant[f] = take;
+      if (want[f] > take) notYet[f] = want[f] - take;
+    });
+
+    var h = "<h3>分三步看（按数量分配）</h3>";
+    h += "<h4>① 现在手上的花材怎么分配合成</h4>" + actsHtml(a1.acts) + restHtml(a1.avail);
+    h += "<h4>② 加上生长中和这轮种下（每颗收 " + H + " 朵）后</h4>" + actsHtml(a2.acts);
+    h += "<h4>③ 下一轮建议种（只列现有种子或买得到的）</h4>" + plantHtml(canPlant);
+    if (Object.keys(notYet).length) {
+      h += '<p class="small muted">还种不了，等合成产出：' +
+        Object.keys(notYet).map(function (f) { return esc(f) + "×" + notYet[f]; }).join("、") + "</p>";
+    }
+    return h;
   }
 
   function waveSection(res) {
@@ -994,17 +1158,24 @@
       }
       res = ranking[0].res;
     } else {
-      var cfg0 = cfg();
-      cfg0.coinBudget = 0;
-      cfg0.useEarnedCoins = false;
-      resNoBuy = M.analyze(cfg0, 1);
-      if (!resNoBuy.targets.length) {
+      var ranked = rankTargets();
+      var count = state.unlockCount > 0 ? Math.min(state.unlockCount, ranked.length) : ranked.length;
+      var chosen = ranked.slice(0, count).map(function (x) { return x.f; });
+      var demand = {};
+      chosen.forEach(function (f) { demand[f] = 1; });
+
+      if (!chosen.length) {
         box.innerHTML = '<p class="empty">图鉴已经全解锁了 🎉</p>';
         return;
       }
+
+      var cfg0 = cfg();
+      cfg0.coinBudget = 0;
+      cfg0.useEarnedCoins = false;
+      resNoBuy = M.analyze(cfg0, 1, { demand: demand, targets: chosen });
       schNoBuy = M.schedule(cfg0, resNoBuy);
       willBuy = state.coins > 0 && schNoBuy.rounds.length > state.roundLimit;
-      res = willBuy ? M.analyze(cfg(), 1) : resNoBuy;
+      res = willBuy ? M.analyze(cfg(), 1, { demand: demand, targets: chosen }) : resNoBuy;
     }
 
     var sch = (mode === "unlock" && !willBuy) ? schNoBuy : M.schedule(cfg(), res);
@@ -1046,7 +1217,8 @@
     if (ranking) h += rankingTable(ranking, F, N);
     if (mode === "unlock") h += exploreSection(res);
 
-    h += waveSection(res);
+    if (mode === "unlock") h += targetRecommendSection();
+    h += stageSection(res, sch);
     h += plantingSection(res, plots, sch);
 
     h += '<details style="margin-top:12px"><summary>后续轮次与完整计划</summary>';
@@ -1080,6 +1252,20 @@
       calc();
     });
 
+    $("#btnLoadAdmin").addEventListener("click", function () {
+      if (!window.GP_ADMIN_STOCK) { alert("没有管理员库存"); return; }
+      state.stock.flower = clone(window.GP_ADMIN_STOCK.flower || {});
+      state.stock.growing = clone(window.GP_ADMIN_STOCK.growing || {});
+      state.stock.seed = clone(window.GP_ADMIN_STOCK.seed || {});
+      state.flowers.forEach(function (f) {
+        if ((state.stock.flower[f] || 0) + (state.stock.growing[f] || 0) + (state.stock.seed[f] || 0) > 0) {
+          state.unlocked.add(f);
+        }
+      });
+      saveStock(); saveMeta(); renderAll(); calc();
+      $("#stockSaved").textContent = "已载入管理员库存";
+    });
+
     $("#btnExportSave").addEventListener("click", function () {
       download("geranium-save.json", JSON.stringify(saveSnapshot(), null, 2));
     });
@@ -1100,7 +1286,7 @@
       var reader = new FileReader();
       reader.onload = function () {
         try {
-          applySnapshot(JSON.parse(reader.result));
+          applySnapshot(parseSave(reader.result));
           $("#stockSaved").textContent = "存档已导入 " + new Date().toLocaleTimeString();
         } catch (err) { alert("导入失败：" + err.message); }
       };
@@ -1162,6 +1348,10 @@
     });
     $("#targetCount").addEventListener("change", function () {
       state.targetCount = Math.max(1, Math.round(num($("#targetCount").value) || 1));
+      saveMeta(); calc();
+    });
+    $("#unlockCount").addEventListener("change", function () {
+      state.unlockCount = Math.max(0, Math.round(num($("#unlockCount").value) || 0));
       saveMeta(); calc();
     });
     $("#sortBy").addEventListener("change", function () {

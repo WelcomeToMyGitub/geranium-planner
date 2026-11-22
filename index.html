@@ -27,9 +27,10 @@
         <summary>存档与管理员库存</summary>
         <div class="row" style="margin-top:8px">
           <button class="mini" id="btnAdminStock">存为默认库存（下载 stock.js）</button>
+          <button class="mini" id="btnLoadAdmin">载入管理员库存</button>
           <button class="mini" id="btnExportSave">导出存档</button>
           <button class="mini" id="btnImportSave">导入存档</button>
-          <input type="file" id="fileSave" accept=".json,application/json" hidden />
+          <input type="file" id="fileSave" accept=".json,.js,application/json,text/javascript" hidden />
         </div>
         <p class="small muted">默认库存文件在 <span class="mono">F:\P_Games\geranium-planner\data\stock.js</span>（仓库里就是 <span class="mono">data/stock.js</span>）。<br />
         「存为默认库存」下载的 stock.js 覆盖它后，任何新环境首次打开都用它；导出/导入是完整快照（库存 + 配方 + 设置）。</p>
@@ -126,6 +127,10 @@
         <option value="speed">速度（地块·轮最少）</option>
         <option value="safe">稳妥（总尝试次数最少）</option>
       </select>
+    </div>
+    <div class="row" id="unlockCountRow">
+      <label class="small muted">本次解锁几个（0 = 全部）</label>
+      <input type="number" id="unlockCount" min="0" max="13" step="1" value="0" />
     </div>
     <div class="row">
       <label class="small muted">可用花花币</label>
