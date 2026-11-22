@@ -55,8 +55,12 @@
   function renderStockStatus() {
     var el = document.getElementById("stockSaved");
     if (!el) return;
-    var t = localStorage.getItem("gp-stock-at");
-    el.textContent = t ? "本机已存 " + new Date(Number(t)).toLocaleTimeString() : "本机未存";
+    try {
+      var t = localStorage.getItem("gp-stock-at");
+      el.textContent = t ? "本机已存 " + new Date(Number(t)).toLocaleTimeString() : "本机未存";
+    } catch (e) {
+      el.textContent = "本机存储不可用";
+    }
   }
   function syncStockFromDom() {
     document.querySelectorAll("#stockTable input").forEach(function (inp) {
@@ -1476,19 +1480,30 @@
   }
 
   function init() {
-    loadAll();
-    renderStockStatus();
-    $("#plots").value = state.plots;
-    $("#roundLimit").value = state.roundLimit;
-    $("#fallback").value = state.fallback;
-    $("#refund").value = String(state.refund);
-    $("#seedYield").value = state.seedYield;
-    $("#harvestYield").value = state.harvestYield;
-    $("#coins").value = state.coins;
-    $("#useEarned").checked = state.useEarned;
-    $("#failReward").value = state.failReward;
-    bindEvents();
+    try {
+      loadAll();
+      $("#plots").value = state.plots;
+      $("#roundLimit").value = state.roundLimit;
+      $("#fallback").value = state.fallback;
+      $("#refund").value = String(state.refund);
+      $("#seedYield").value = state.seedYield;
+      $("#harvestYield").value = state.harvestYield;
+      $("#coins").value = state.coins;
+      $("#useEarned").checked = state.useEarned;
+      $("#failReward").value = state.failReward;
+      $("#maxBuy").value = state.maxBuy;
+      bindEvents();
+    } catch (e) {
+      console.error("初始化出错", e);
+      var box = document.getElementById("result");
+      if (box) {
+        box.innerHTML = '<pre class="small" style="color:#f87171;white-space:pre-wrap">初始化出错：' +
+          esc(e.message) + "</pre>";
+      }
+    }
+
     renderAll();
+    renderStockStatus();
     calc();
   }
 
