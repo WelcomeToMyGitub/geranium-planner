@@ -45,7 +45,18 @@
 
   // ---------- 存 ----------
   function saveStock() {
-    try { localStorage.setItem(LS_STOCK, JSON.stringify(state.stock)); } catch (e) {}
+    try {
+      localStorage.setItem(LS_STOCK, JSON.stringify(state.stock));
+      localStorage.setItem("gp-stock-at", String(Date.now()));
+    } catch (e) {}
+    renderStockStatus();
+  }
+
+  function renderStockStatus() {
+    var el = document.getElementById("stockSaved");
+    if (!el) return;
+    var t = localStorage.getItem("gp-stock-at");
+    el.textContent = t ? "本机已存 " + new Date(Number(t)).toLocaleTimeString() : "本机未存";
   }
   function syncStockFromDom() {
     document.querySelectorAll("#stockTable input").forEach(function (inp) {
@@ -570,14 +581,14 @@
     return h;
   }
 
-  function scheduleSection(sch) {
-    var h = "<h3>② 轮次安排</h3>";
+  function scheduleSection(sch, targets) {
+    var h = "<h3>② 轮次安排（按期望成功次数）</h3>";
     if (!sch.rounds.length) {
       h += '<p class="empty">不需要种种子。</p>';
       return h;
     }
 
-    h += '<p class="small">至少 <b>' + sch.rounds.length + "</b> 轮（理论下界 " + sch.lower +
+    h += '<p class="small">按期望约 <b>' + sch.rounds.length + "</b> 轮（理论下界 " + sch.lower +
       " 轮），共使用 <b>" + sch.totalPlots + "</b> 块地·次。" +
       (sch.stall ? ' <span class="pill bad">中途卡住：材料不够，检查配方</span>' : "") + "</p>";
 
@@ -591,21 +602,25 @@
         return '<span class="pill">' + esc(f) + " ×" + r.planted[f] + "</span>";
       }).join(" ") || '<span class="muted">（空）</span>';
       var cnt = keys.reduce(function (s, f) { return s + r.planted[f]; }, 0);
+      var got = sk.filter(function (f) { return targets.indexOf(f) >= 0; });
       return "<tr><td>第 " + (i + 1) + " 轮</td><td>" + synthPills + "</td><td>" + pills + "</td>" +
         '<td class="mono">' + cnt + "</td>" +
-        '<td class="mono">' + r.seeds + "</td></tr>";
+        '<td class="mono">' + r.seeds + "</td>" +
+        "<td>" + (got.length ? '<span class="pill ok">★ ' + got.join("、") + "</span>" : "") + "</td></tr>";
     }
 
-    h += '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成</th><th>再种</th><th>用地</th><th>产出种子</th></tr></thead><tbody>';
+    h += '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成（期望）</th><th>再种</th><th>用地</th><th>产出种子</th><th>本轮达成</th></tr></thead><tbody>';
     sch.rounds.slice(0, 2).forEach(function (r, i) { h += row(r, i); });
     h += "</tbody></table>";
 
     if (sch.rounds.length > 2) {
       h += '<details><summary>第 3 轮及以后（还有 ' + (sch.rounds.length - 2) + ' 轮）</summary>' +
-        '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成</th><th>再种</th><th>用地</th><th>产出种子</th></tr></thead><tbody>';
+        '<table style="margin-top:8px"><thead><tr><th>轮次</th><th>先合成（期望）</th><th>再种</th><th>用地</th><th>产出种子</th><th>本轮达成</th></tr></thead><tbody>';
       sch.rounds.slice(2).forEach(function (r, i) { h += row(r, i + 2); });
       h += "</tbody></table></details>";
     }
+
+    h += '<p class="small muted">「先合成」是按期望成功次数排的，不是保证成功。实际有概率，可能提前或延后；每轮结束按真实库存重算一次。</p>';
     return h;
   }
 
@@ -1231,7 +1246,7 @@
     h += plantingSection(res, plots, sch);
 
     h += '<details style="margin-top:12px"><summary>后续轮次与完整计划</summary>';
-    h += scheduleSection(sch);
+    h += scheduleSection(sch, res.targets);
     h += synthSection(res);
     h += treeSection(res);
     h += "</details>";
@@ -1462,6 +1477,7 @@
 
   function init() {
     loadAll();
+    renderStockStatus();
     $("#plots").value = state.plots;
     $("#roundLimit").value = state.roundLimit;
     $("#fallback").value = state.fallback;
